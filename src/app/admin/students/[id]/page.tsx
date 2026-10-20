@@ -1,0 +1,18 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { z } from "zod";
+import { adminPage } from "@/server/auth/http";
+import { getDatabase } from "@/server/db";
+import { StudentStatus } from "@/components/admin/student-status";
+import { ResetSignInLimits } from "@/components/admin/reset-sign-in-limits";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
+
+export default async function StudentPage({ params }: { params: Promise<{ id: string }> }) {
+  await adminPage(); const { id } = await params;
+  if (!z.string().uuid().safeParse(id).success) notFound();
+  const student = await getDatabase().user.findFirst({ where: { id, isAdmin: false }, include: { assignments: { include: { assessment: { select: { title: true } }, attempts: { orderBy: { attemptNumber: "desc" }, select: { id: true, attemptNumber: true, status: true } } } } } });
+  if (!student) notFound();
+  const active = student.assignments.flatMap((a) => a.attempts).filter((a) => a.status === "ACTIVE").length;
+  return <div className="max-w-3xl space-y-6"><Link href="/admin/students" className="text-sm text-primary hover:underline">Back to students</Link><h1 className="text-3xl font-semibold">{student.displayName}</h1><Card><CardHeader><CardTitle>Registration</CardTitle></CardHeader><CardContent><dl className="grid gap-2 text-sm"><dt className="text-muted-foreground">Login email</dt><dd>{student.email}</dd><dt className="text-muted-foreground">Admission number</dt><dd>{student.admissionNumber ?? "Not supplied"}</dd><dt className="text-muted-foreground">Email verification</dt><dd>{student.emailVerifiedAt ? "Verified" : "Awaiting first sign-in"}</dd></dl></CardContent></Card><Card><CardHeader><CardTitle>Account access · {student.disabledAt ? "Disabled" : "Enabled"}</CardTitle></CardHeader><CardContent className="space-y-4">{active > 0 && <Alert role="status"><AlertDescription>This student has {active} active attempt(s). Disabling blocks further saves; normal expiry still applies.</AlertDescription></Alert>}<StudentStatus id={id} disabled={!!student.disabledAt} /></CardContent></Card>{!student.disabledAt && <Card><CardHeader><CardTitle>Sign-in limits</CardTitle></CardHeader><CardContent><ResetSignInLimits id={id} /></CardContent></Card>}<Card><CardHeader><CardTitle>Assessment history</CardTitle></CardHeader><CardContent>{!student.assignments.length ? <p className="text-sm text-muted-foreground">No assessments assigned.</p> : <ul className="space-y-3">{student.assignments.map((assignment) => <li key={assignment.id}><p className="font-medium">{assignment.assessment.title}</p><p className="text-sm text-muted-foreground">{assignment.attempts.length ? assignment.attempts.map((a) => `Attempt ${a.attemptNumber}: ${a.status.toLowerCase()}`).join(" · ") : "Not started"}</p></li>)}</ul>}</CardContent></Card></div>;
+}
