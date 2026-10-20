@@ -2,7 +2,8 @@ import { z } from "zod";
 import { requireAdmin } from "@/server/auth/http";
 import { getDatabase } from "@/server/db";
 import { bodyJson, endpoint, json } from "@/server/http";
-import { activateDrafts, MAX_BULK_ACTIVATION } from "@/server/questions/service";
+import { MAX_BULK_ACTIVATION } from "@/shared/questions";
+import { activateDrafts } from "@/server/questions/service";
 
 const body = z.object({
   confirmed: z.literal(true, { error: "Confirm that these questions were reviewed before uploading." }),

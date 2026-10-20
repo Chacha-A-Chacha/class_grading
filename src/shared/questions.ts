@@ -8,6 +8,8 @@ export const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"] as const;
 export const CONTENT_KINDS = ["TEXT", "CODE"] as const;
 export const STATUSES = ["DRAFT", "ACTIVE", "RETIRED"] as const;
 export const MAX_IMPORT = 200;
+/** Largest batch the bulk "Activate all drafts" action accepts. */
+export const MAX_BULK_ACTIVATION = 500;
 
 // Options must survive per-attempt shuffling, so they cannot refer to each other.
 const DEPENDENT_OPTION = /^\s*(all|none|both|neither)\s+of\s+the\s+(above|below)|^\s*(both|either|neither)\s+[a-f]\s+(and|or|nor)\s+[a-f]\b|^\s*options?\s+[a-f]\s+(and|or)\s+[a-f]\b/i;

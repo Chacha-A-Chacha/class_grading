@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient } from "../../generated/prisma/client";
-import { type Question, validateImport, STATUSES, KINDS, DIFFICULTIES } from "../../shared/questions";
+import { type Question, validateImport, MAX_BULK_ACTIVATION, STATUSES, KINDS, DIFFICULTIES } from "../../shared/questions";
 import { assertAdmin, now } from "../auth/service";
 import { AppError } from "../errors";
 
@@ -99,7 +99,6 @@ export async function activateDraft(db: PrismaClient, sessionId: string, version
   });
 }
 
-export const MAX_BULK_ACTIVATION = 500;
 /**
  * Activates many reviewed drafts at once, all or nothing. Each item carries the draft's
  * recordVersion from the list the owner confirmed, so a draft edited since then stops the batch.
