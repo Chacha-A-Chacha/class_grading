@@ -63,8 +63,12 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   2–6 options, edit-conflict detection, student-view and answer previews, explicit
   activation, new numbered versions for changes, retirement, filtering, active supply
   per topic, and all-or-nothing [JSON import](docs/question-import.md).
+- **Assessment setup (admin workflow slice 3):** draft details in East Africa Time,
+  blueprint slots with live supply counts, set generation that never exceeds the
+  overlap limit (diagnostics instead of relaxing it), a fixed student audience with
+  audited extra time, and a publication checklist that freezes the assessment.
 
-Assessments and sets, the exam engine, student dashboard, readiness
+The exam engine, student dashboard, results, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
 student's name, admission number or login email is not built yet. Liveness only
 proves the application can respond; it does not certify exam readiness.
