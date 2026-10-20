@@ -3,8 +3,9 @@
 Status: implementation plan, 13 October 2026; updated 20 October 2026. Slice 1
 (owner sign-in, roster, manual add, disable/reactivate and bulk import), slice 2
 (question bank and JSON import) and slice 3 (assessment setup and publication) are
-implemented. Profile/email correction for conflicting rows, audited schedule changes
-after publication, and slices 4-5 are not.
+implemented, and students can take published assessments (start, save, submit,
+expiry). Profile/email correction for conflicting rows, audited schedule changes after
+publication, live monitoring and overrides (slice 4) and results (slice 5) are not.
 This plan follows
 [the specification](../SPECIFICATION.md) and the existing Prisma schema.
 

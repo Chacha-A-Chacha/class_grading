@@ -17,13 +17,20 @@ errors**. Design every hot path so concurrent students lock different rows.
 | Login rate limits | Counters increment in one autocommitted `INSERT … ON CONFLICT … RETURNING` before the login transaction, stop at the first exhausted limit, and count account issuance only when a code is sent. A shared IP bucket no longer serialises the class. | `src/server/auth/service.ts` (`consume`) |
 | Client IP | Per-IP limits apply only when `TRUST_PROXY_IP=true` behind a proxy that overwrites `X-Real-IP`; production refuses to run sign-in without it. Limits are sized for one campus NAT (1,000 requests / 2,000 verifications per 15 min). | `src/server/auth/http.ts` |
 | Database timeouts | `statement_timeout` 10 s, `lock_timeout` 2 s, `idle_in_transaction_session_timeout` 10 s, `application_name` from `DB_APP_NAME`. | `src/server/db.ts` |
-| Retryable errors | Deadlock, serialization failure, lock/statement timeout and pool timeout return `503 BUSY` with `Retry-After: 1`; the transaction was rolled back, so the client may retry. | `src/server/http.ts` |
+| Retryable errors | Deadlock, serialization failure, lock/statement timeout and pool timeout return `503 BUSY` with `Retry-After: 1`; the transaction was rolled back, so the client may retry. | `src/server/http.ts`, `src/server/retry.ts` |
 | Session lookups | One indexed query per request, deduplicated per render with React `cache()`, selecting only needed user fields. No cross-request cache: revocation must take effect immediately. | `src/server/auth/http.ts` |
 | HOT updates | `fillfactor = 80` on `Attempt` and `AttemptAnswer` so frequent updates of unindexed columns can stay heap-only. | migration `20261014120000_integrity_hardening` |
 | Private caching | `Cache-Control: private, no-store` on `/api`, `/admin`, `/student`, `/sign-in`; Cache Components stay disabled. | `next.config.ts` |
 | Imports | Workbook parsing is synchronous CPU work, so previews are refused while any attempt is active. | `src/server/students/service.ts` |
 
 ## Rules for the exam engine (milestone 3)
+
+Implemented 20 October 2026 in `src/server/attempts/service.ts` and `workers/worker.ts`
+following rules 1–6 below: start takes `FOR SHARE` on the assessment and `FOR UPDATE` on the
+assignment; saves, submit and expiry lock the attempt with `FOR NO KEY UPDATE` and read
+`clock_timestamp()` after the lock; the heartbeat is one autocommitted statement; start,
+save and submit retry through `withRetry`. Rule 7 (in-process DTO cache) waits for load
+test evidence.
 
 1. **Start must not queue on the Assessment row.** Start takes `FOR SHARE` on `Assessment`
    and `FOR UPDATE` on its own `AssessmentAssignment`. Release, schedule change, retest and
@@ -43,8 +50,8 @@ errors**. Design every hot path so concurrent students lock different rows.
    - interval '10 seconds') RETURNING …`. Never index `lastSeenAt`. If HOT ratios are poor,
    move presence to a narrow `AttemptPresence` table.
 5. **Retries:** wrap idempotent transactions (start with its idempotency key, save, submit) in
-   at most three attempts with 20–100 ms jittered backoff using `isRetryable` from
-   `src/server/http.ts`. Never retry non-idempotent work.
+   at most three attempts with 20–100 ms jittered backoff using `withRetry` from
+   `src/server/retry.ts`. Never retry non-idempotent work.
 6. **Expiry sweep:** `FOR UPDATE SKIP LOCKED LIMIT 50`, one short transaction per attempt.
 7. **Frozen content:** published sets are immutable; cache question DTOs (never answer keys)
    in-process by `setId`.

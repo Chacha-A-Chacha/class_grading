@@ -67,8 +67,17 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   blueprint slots with live supply counts, set generation that never exceeds the
   overlap limit (diagnostics instead of relaxing it), a fixed student audience with
   audited extra time, and a publication checklist that freezes the assessment.
+- **Exam engine (milestone 3):** student dashboard, rules acknowledgement and idempotent
+  start with least-used set selection and per-student option shuffling; a
+  server-calibrated timer; answer saves with revisions, sequence ordering, retries and
+  visible save states; mark for review; heartbeat; atomic save-and-submit with a
+  receipt; deterministic scoring; and an expiry worker (`npm run worker`, every 15 s).
+  Reads and writes also resolve overdue attempts, so worker downtime never admits late
+  answers. Acceptance checks A01–A04, A08 and A09 run against PostgreSQL in
+  `tests/db/attempts.test.ts`.
 
-The exam engine, student dashboard, results, readiness
+The device-local recovery queue, takeover and late evidence (milestone 4), live
+monitoring, results release, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
 student's name, admission number or login email is not built yet. Liveness only
 proves the application can respond; it does not certify exam readiness.
