@@ -48,6 +48,19 @@ export async function adminPage() {
   if (mfaRequired() && !session.mfaVerifiedAt) redirect("/sign-in/mfa");
   return session;
 }
+/** Students only: the owner manages assessments but never takes them. */
+export async function requireStudent() {
+  const session = await currentSession();
+  if (!session) throw new AppError("UNAUTHENTICATED", "Sign in to continue.", 401);
+  if (session.user.isAdmin) throw new AppError("FORBIDDEN", "Assessments are taken from a student account.", 403);
+  return session;
+}
+export async function studentPage() {
+  const session = await currentSession(true);
+  if (!session) redirect("/sign-in");
+  if (session.user.isAdmin) redirect("/admin");
+  return session;
+}
 export function requireSameOrigin(request: Request) {
   if (request.headers.get("origin") !== origin() || request.headers.get("sec-fetch-site") === "cross-site") throw new AppError("INVALID_ORIGIN", "Reload this page and try again.", 403);
 }
