@@ -1,4 +1,4 @@
-# Code Logic Assessment Platform
+# Tracebench: code logic assessment platform
 
 **Development specification** | Version 1.1 | 13 October 2026
 

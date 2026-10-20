@@ -1,4 +1,7 @@
-# Code Logic Assessment Platform
+# Tracebench
+
+Timed code-reading assessments, run fairly. Tracebench is an independent product: it is
+not branded for, or tied to, any one school or programme.
 
 Timed programming assessments built with Next.js App Router and TypeScript.
 The product requirements are in [SPECIFICATION.md](SPECIFICATION.md).

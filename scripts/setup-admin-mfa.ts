@@ -5,6 +5,7 @@ import { generateSecret, generateURI, verify } from "otplib";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { encrypt, verifier } from "../src/server/auth/crypto";
+import { BRAND } from "../src/shared/brand";
 
 async function main() {
   if (!process.stdin.isTTY) throw new Error("Run this command in your own interactive terminal to set up the authenticator.");
@@ -21,7 +22,7 @@ async function main() {
     const secret = generateSecret();
     const encryptedTotpSecret = encrypt(secret);
     console.log("Add this secret to your authenticator app. Keep it private:", secret);
-    console.log(generateURI({ issuer: "Code Logic Assessments", label: owner.email, secret }));
+    console.log(generateURI({ issuer: BRAND.name, label: owner.email, secret }));
     const code = (await terminal.question("Enter the six-digit code from your authenticator: ")).trim();
     // Verify against the database clock, which sign-in also uses, so a fast or slow
     // laptop clock cannot record a replay step that sign-in cannot accept yet.

@@ -3,15 +3,16 @@ import { connection } from "next/server";
 import "./globals.css";
 import { Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { BRAND } from "@/shared/brand";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 
 export const metadata: Metadata = {
   title: {
-    default: "Code Logic Assessments",
-    template: "%s | Code Logic Assessments",
+    default: BRAND.name,
+    template: `%s | ${BRAND.name}`,
   },
-  description: "Programming assessments for code interpretation and conceptual understanding.",
+  description: BRAND.description,
   robots: { index: false, follow: false },
 };
 

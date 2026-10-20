@@ -8,6 +8,7 @@ import { getDatabase } from "../db";
 import { AppError } from "../errors";
 import { secret } from "./crypto";
 import { loopbackAlias } from "./origin";
+import { BRAND } from "../../shared/brand";
 import { getSession, mfaRequired, SESSION_SECONDS } from "./service";
 
 const envelopeSchema = z.object({ token: z.string().max(100).optional(), browser: z.string().max(100).optional(), challengeId: z.string().uuid().optional(), subject: z.string().length(64).optional() });
@@ -64,7 +65,7 @@ export async function studentPage() {
 }
 export function requireSameOrigin(request: Request) {
   const expected = origin(), received = request.headers.get("origin");
-  if ((received !== expected && !loopbackAlias(received, expected)) || request.headers.get("sec-fetch-site") === "cross-site") throw new AppError("INVALID_ORIGIN", `This request did not come from the Code Logic site. Open ${expected} and try again.`, 403);
+  if ((received !== expected && !loopbackAlias(received, expected)) || request.headers.get("sec-fetch-site") === "cross-site") throw new AppError("INVALID_ORIGIN", `This request did not come from the ${BRAND.name} site. Open ${expected} and try again.`, 403);
 }
 /**
  * Only trust X-Real-IP behind a proxy that OVERWRITES it (Caddy: header_up X-Real-IP {remote_host}).
