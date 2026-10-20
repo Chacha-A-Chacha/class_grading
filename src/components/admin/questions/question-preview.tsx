@@ -1,3 +1,4 @@
+import { CodeBlock } from "@/components/code-block";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -8,11 +9,6 @@ export type PreviewQuestion = {
   options: { kind: "TEXT" | "CODE"; content: string; correct: boolean }[];
 };
 export const LETTERS = ["A", "B", "C", "D", "E", "F"];
-
-/** React escapes all content, so question text and code can never run as HTML. */
-export function CodeBlock({ code, language }: { code: string; language?: string | null }) {
-  return <pre className="overflow-x-auto rounded-lg border bg-muted p-4 font-mono text-sm leading-relaxed" tabIndex={0} aria-label={language ? `${language} code` : "Code"}><code>{code}</code></pre>;
-}
 
 /** `answers` adds the correct option and explanation for the owner's review. */
 export function QuestionPreview({ question, answers = false, idPrefix }: { question: PreviewQuestion; answers?: boolean; idPrefix: string }) {
