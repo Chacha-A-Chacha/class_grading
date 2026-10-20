@@ -19,10 +19,10 @@ export default function OpengraphImage() {
         <div style={{ fontSize: 60, fontWeight: 700, color: c.primary }}>{BRAND.name}</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-        <div style={{ fontSize: 58, fontWeight: 700, lineHeight: 1.1, maxWidth: 980 }}>Timed code-reading assessments, run fairly.</div>
-        <div style={{ fontSize: 30, color: c.mutedForeground, maxWidth: 980 }}>No password. Answers saved as you go. The same clock for everyone.</div>
+        <div style={{ fontSize: 58, fontWeight: 700, lineHeight: 1.1, maxWidth: 980 }}>{BRAND.tagline}</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "22px 28px", borderRadius: 16, background: c.muted, border: `2px solid ${c.border}`, fontFamily: "monospace", fontSize: 26, color: c.foreground }}>
+        <div style={{ display: "flex", marginBottom: 8, fontFamily: "sans-serif", fontWeight: 600, color: c.mutedForeground }}>What does this log?</div>
         {code.map((line) => <div key={line} style={{ display: "flex" }}>{line}</div>)}
       </div>
     </div>,

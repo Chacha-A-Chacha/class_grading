@@ -9,28 +9,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const steps = [
-  { icon: ClipboardCheck, title: "Your instructor assigns it", text: "You are enrolled by your instructor and see each assessment on your dashboard, with its opening time and duration." },
-  { icon: Mail, title: "Sign in with an emailed code", text: "No password. Enter the email your instructor registered and type the six-digit code we send you." },
-  { icon: ListChecks, title: "Answer, then submit", text: "Work through the questions in any order. Every answer is saved as you go, and you get a receipt when you submit." },
+  { icon: ClipboardCheck, title: "Your instructor enrols you", text: "Your instructor adds you to the class and assigns each assessment. Your dashboard shows when each one opens and how long it lasts." },
+  { icon: Mail, title: "Sign in with a code", text: "Enter the email your instructor registered for you. We email a six-digit code to type in; there is no password." },
+  { icon: ListChecks, title: "Answer and submit", text: "Answer the questions in any order and change your answers until you submit. You then get a receipt showing the submission time." },
 ];
-const fairness = [
-  { icon: Clock, title: "One clock for everyone", text: "The timer starts when you press Start and the server keeps the time, so a slow device or a changed clock never costs or gains anyone a minute." },
-  { icon: Save, title: "Saved as you go", text: "Each answer is sent to the server straight away. The screen shows when it is saved, and keeps retrying if your connection drops." },
-  { icon: Shuffle, title: "Balanced question sets", text: "Questions come from balanced sets chosen by your instructor, and options are shuffled for each person, so neighbouring screens rarely match." },
-  { icon: Laptop, title: "Built for reading code", text: "Code is shown exactly as written, with scrolling for long lines. A laptop is best for code-heavy papers; phones are supported." },
+const examFacts = [
+  { icon: Clock, title: "Timer", text: "The time limit is set by your instructor and counted on the server, so changing your device's clock has no effect." },
+  { icon: Save, title: "Saving", text: "Each answer is sent to the server when you choose it, and the screen shows whether it has been saved." },
+  { icon: Shuffle, title: "Question sets", text: "Your instructor may use more than one set of questions. Answer options are shown in a different order for each student." },
+  { icon: Laptop, title: "Code on screen", text: "Code is shown as written, and long lines scroll sideways. A laptop is easier for long code, but phones work too." },
 ];
 const checklist = [
-  "Find a quiet place and a charged laptop if you can.",
-  "Check you can open your email on another tab or device.",
-  "Read the rules page before you press Start: the timer begins then.",
-  "Answer every question. An unanswered question scores zero; a wrong answer costs nothing extra.",
+  "Use a charged laptop in a quiet place if you can.",
+  "Make sure you can open your email, because you need it for the sign-in code.",
+  "Read the rules page first. The timer starts when you press Start.",
+  "Answer every question. Unanswered questions score zero, and wrong answers do not lose marks.",
 ];
 const faqs = [
-  { q: "Do I need a password?", a: "No. Each time you sign in, we email a six-digit code to your registered address. It works for two minutes, in the browser where you asked for it." },
-  { q: "What if my internet drops during an assessment?", a: "Keep the page open. Answers you choose are kept on screen and sent again when you reconnect; the status shows whether each one has reached the server. The timer does not pause, and only answers the server receives before your deadline count." },
-  { q: "Can I go back and change an answer?", a: "Yes, until you submit or time runs out. You can move freely between questions and mark any of them to review before submitting." },
-  { q: "When will I see my results?", a: "After every student's answering window has closed and your instructor releases results. You will then see your score, with explanations where your instructor shares them." },
-  { q: "Who can sign in?", a: "Only students your instructor has enrolled, and instructors. If a code does not arrive, check your spam folder or ask your instructor to confirm your registered email." },
+  { q: "How long does the sign-in code last?", a: "Two minutes, and it only works in the browser where you requested it. If it expires, request a new one." },
+  { q: "What if my internet drops during an assessment?", a: "Keep the page open. Answers that were not saved stay on screen and are sent again when you reconnect. The timer keeps running, and only answers the server receives before the deadline count." },
+  { q: "Can I go back and change an answer?", a: "Yes, until you submit or the time runs out. You can also mark questions for review and come back to them." },
+  { q: "When will I see my results?", a: "Results are released after every student's time to answer has closed. Your instructor decides when." },
+  { q: "Who can sign in?", a: "Students your instructor has enrolled, and the instructor. If the code does not arrive, check your spam folder, then ask your instructor to confirm the email they registered for you." },
 ];
 
 // The only page search engines may index; it shares the root Open Graph card.
@@ -54,13 +54,12 @@ export default function HomePage() {
       <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:py-24">
         <div className="space-y-6">
           <Badge variant="secondary">For enrolled students and their instructors</Badge>
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">Show how well you can read code and reason about what it does.</h1>
-          <p className="max-w-xl text-lg leading-relaxed text-muted-foreground">{BRAND.name} runs your class&apos;s timed assessments: real code to trace, one question on screen at a time, every answer saved as you go, and the same clock for everyone.</p>
+          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">{BRAND.tagline}</h1>
+          <p className="max-w-xl text-lg leading-relaxed text-muted-foreground">Each question shows a short piece of code and asks what it does or what it prints. You see one question at a time and can move between them freely.</p>
           <div className="flex flex-wrap gap-3">
             <Button asChild size="lg"><Link href="/sign-in"><LogIn aria-hidden="true" />Sign in</Link></Button>
             <Button asChild size="lg" variant="outline"><a href="#how-it-works">How it works</a></Button>
           </div>
-          <p className="text-sm text-muted-foreground">No password needed. You sign in with a code sent to the email your instructor registered.</p>
         </div>
 
         {/* Illustration of the exam screen; decorative, so hidden from assistive technology. */}
@@ -86,7 +85,7 @@ console.log(passed.length);`}</pre>
 
       <section id="how-it-works" className="border-y bg-card">
         <div className="mx-auto max-w-6xl space-y-8 px-6 py-16">
-          <div className="max-w-2xl space-y-2"><h2 className="text-3xl font-semibold tracking-tight">How it works</h2><p className="text-muted-foreground">Three steps, from enrolment to your receipt.</p></div>
+          <h2 className="text-3xl font-semibold tracking-tight">How it works</h2>
           <ol className="grid gap-6 md:grid-cols-3">
             {steps.map(({ icon: Icon, title, text }, i) => <li key={title}><Card className="h-full"><CardHeader><div className="flex items-center gap-3"><span className="flex size-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">{i + 1}</span><Icon aria-hidden="true" className="size-5 text-primary" /></div><CardTitle className="pt-2"><h3>{title}</h3></CardTitle><CardDescription>{text}</CardDescription></CardHeader></Card></li>)}
           </ol>
@@ -94,9 +93,9 @@ console.log(passed.length);`}</pre>
       </section>
 
       <section className="mx-auto max-w-6xl space-y-8 px-6 py-16">
-        <div className="max-w-2xl space-y-2"><h2 className="text-3xl font-semibold tracking-tight">Fair by design</h2><p className="text-muted-foreground">An assessment should measure what you understand, not how fast your connection is.</p></div>
+        <h2 className="text-3xl font-semibold tracking-tight">During the assessment</h2>
         <ul className="grid gap-6 sm:grid-cols-2">
-          {fairness.map(({ icon: Icon, title, text }) => <li key={title} className="flex gap-4"><span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary"><Icon aria-hidden="true" className="size-5 text-primary" /></span><div className="space-y-1"><h3 className="font-semibold">{title}</h3><p className="text-sm leading-relaxed text-muted-foreground">{text}</p></div></li>)}
+          {examFacts.map(({ icon: Icon, title, text }) => <li key={title} className="flex gap-4"><span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-secondary"><Icon aria-hidden="true" className="size-5 text-primary" /></span><div className="space-y-1"><h3 className="font-semibold">{title}</h3><p className="text-sm leading-relaxed text-muted-foreground">{text}</p></div></li>)}
         </ul>
       </section>
 
@@ -107,13 +106,13 @@ console.log(passed.length);`}</pre>
             <ul className="space-y-3">{checklist.map((item) => <li key={item} className="flex gap-3"><MonitorCheck aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" /><span>{item}</span></li>)}</ul>
           </div>
           <Card>
-            <CardHeader><CardTitle><h2 className="text-xl">For instructors</h2></CardTitle><CardDescription>Sign in from the same page. Your account opens the admin workspace.</CardDescription></CardHeader>
+            <CardHeader><CardTitle><h2 className="text-xl">For instructors</h2></CardTitle><CardDescription>Instructors use the same sign-in page and go to the admin area.</CardDescription></CardHeader>
             <CardContent>
               <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed">
-                <li>A question bank with reviewed, versioned questions: single answer or select all that apply, with code in prompts and options.</li>
-                <li>Assessments built from blueprints, with parallel sets that share no more than the overlap you allow.</li>
-                <li>Live monitoring during the sitting, and audited extensions, voids and retests.</li>
-                <li>Roster and question imports with a preview before anything is saved.</li>
+                <li>A question bank where each question is reviewed before use and edits are saved as new versions. Questions can have one correct answer or several, and code can appear in the question or the options.</li>
+                <li>Assessments built from a plan of topics and difficulty, with more than one question set if you need it and a limit on how many questions the sets share.</li>
+                <li>A live view of who has started and submitted. Extensions, voided attempts and retests are recorded in an audit log.</li>
+                <li>Class list and question imports, with a preview before anything is saved.</li>
               </ul>
             </CardContent>
           </Card>
@@ -129,7 +128,7 @@ console.log(passed.length);`}</pre>
           </Collapsible>)}
         </div>
         <div className="flex flex-wrap items-center gap-4 rounded-lg border bg-secondary/40 p-6">
-          <p className="flex-1 font-medium">Ready when your instructor opens an assessment.</p>
+          <p className="flex-1 font-medium">Sign in to see your assessments.</p>
           <Button asChild><Link href="/sign-in"><LogIn aria-hidden="true" />Sign in</Link></Button>
         </div>
       </section>
@@ -138,7 +137,7 @@ console.log(passed.length);`}</pre>
     <footer className="border-t">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm text-muted-foreground">
         <BrandMark className="text-sm" />
-        <p>{BRAND.tagline} Questions about an assessment? Contact your instructor.</p>
+        <p>For questions about an assessment, contact your instructor.</p>
       </div>
     </footer>
   </div>;

@@ -1,11 +1,11 @@
 /** Product identity in one place. The product is independent of any one school or programme. */
 export const BRAND = {
   name: "Tracebench",
-  tagline: "Timed code-reading assessments, run fairly.",
-  description: "Tracebench runs timed assessments that test how well you can read code and reason about what it does.",
+  tagline: "Timed code-reading assessments for programming classes",
+  description: "Tracebench runs timed multiple-choice assessments in which students read short pieces of code and say what they do.",
   /** Link previews (Open Graph, X, WhatsApp): keep the description under about 160 characters. */
-  shareTitle: "Tracebench: timed code-reading assessments, run fairly",
-  shareDescription: "Sign in to your class's code assessments. No password needed, answers saved as you go, and the same clock for everyone.",
+  shareTitle: "Tracebench: timed code-reading assessments",
+  shareDescription: "Take your programming class's timed assessments. Sign in with a code sent to the email your instructor registered.",
   locale: "en_KE",
   /** Hex equivalents of the theme tokens in globals.css, for places that cannot use CSS variables. */
   colors: { primary: "#ca3500", primaryForeground: "#fff7ed", foreground: "#0c0c09", muted: "#f4f4f0", mutedForeground: "#7c7c67", border: "#e8e8e3" },
