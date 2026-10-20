@@ -23,6 +23,7 @@
     "db:seed": "prisma db seed",
     "admin:setup-mfa": "tsx scripts/setup-admin-mfa.ts",
     "db:cleanup-auth": "tsx scripts/cleanup-auth.ts",
+    "worker": "tsx workers/worker.ts",
     "test:unit": "tsx --test tests/unit/*.test.ts",
     "db:studio": "prisma studio",
     "test:db": "tsx --test tests/db/*.test.ts"
