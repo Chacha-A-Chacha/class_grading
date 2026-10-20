@@ -38,7 +38,7 @@ The production-only audit reports zero known vulnerabilities as of 13 October
 
 ## Current implementation
 
-- Next.js 16.4.0, React 19.3.0, strict TypeScript, and flat ESLint configuration.
+- Next.js 16.4.2, React 19.3.1, strict TypeScript, and flat ESLint configuration.
 - Tailwind CSS 4 and shadcn/ui preset `b3kJVrgzg`: Nova with Radix primitives,
   olive neutrals, orange accents, Inter, Lucide icons, and small corner radii.
 - Server-rendered home page and public `/api/v1/health/live` endpoint.

@@ -40,13 +40,19 @@ used by the scaffold.
 | [AVIF image optimization remote code execution](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4) and [Windows-hosted server remote code execution](https://github.com/vercel/next.js/security/advisories/GHSA-p293-qw3h-jr36) | Both list 16.3.3 as patched on the 16.x line; selected 16.4.0 is outside their affected ranges. Windows development still binds to loopback. |
 | [September 30 security release](https://nextjs.org/blog/september-2026-security-release) | Published fixes in 16.3.8 cover image SSRF, cache poisoning/disclosure, metadata image access, and development MCP information disclosure. The selected 16.4.0 release is newer. |
 
-## Required follow-up: 14 October 2026
+## October 14 security update: applied 20 October 2026
 
-Next.js [announced an upstream security update](https://nextjs.org/blog/upcoming-nextjs-security-update-october-2026)
-for 14 October, covering two Critical and one High severity issue. On the review
-date, the announcement does not supply full impact, affected ranges, CVE IDs,
-or patched versions. Do not treat 16.4.0 or a clean npm audit as proof those
-unpublished issues are resolved. Review and apply that release before deployment.
+The [October 14 release](https://nextjs.org/blog/nextjs-security-update-october-14-2026)
+fixed unauthenticated RCE in `use cache` functions returning typed arrays
+(GHSA-673q-mjm6-r5xr, with React GHSA-xqc2-xf4c-x3h3), RCE in SVG image optimisation
+via `sharp` on glibc Linux (CVE-2026-96889), and Server Action CPU exhaustion
+(GHSA-p3m5-59mp-jv5r, with React GHSA-h3gv-c5rc-p453). Patched in 16.4.1.
+
+This app was not practically exposed: Cache Components are disabled, there are no
+Server Actions, `next/image` is unused, SVG optimisation is disallowed and the lockfile
+already had `sharp` 0.35.5. It now pins Next.js and `eslint-config-next` 16.4.2 and
+React/react-dom 19.3.1. Check, unit, database (28) and production-server smoke tests
+passed; the production audit reports zero vulnerabilities.
 
 For each update, inspect the [maintainer advisories](https://github.com/vercel/next.js/security/advisories),
 choose the patched stable version, update Next.js and `eslint-config-next`
@@ -137,8 +143,7 @@ Open items, by priority:
    mailbox alone grants full admin rights: roster changes now, and answer keys and
    results once those features exist. Specification A18 is not met. Restore with
    `ADMIN_MFA=required` before graded use.
-1. Apply the announced Next.js security release once published. As of this audit npm
-   still lists 16.4.0 as latest (16.5 is canary only).
+1. ~~Apply the October 14 Next.js security release~~: done 20 October 2026 (16.4.2).
 2. Name/admission correction and the audited login-email change workflow (admin
    workflow §4). Conflicting import rows currently have no in-app resolution path.
 3. Schedule `npm run db:cleanup-auth` until the worker owns retention; expired import
