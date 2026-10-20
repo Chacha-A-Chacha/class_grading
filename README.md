@@ -59,8 +59,12 @@ The production-only audit reports zero known vulnerabilities as of 13 October
 - **Roster (admin workflow slice 1):** student list/search, detail, manual add,
   audited disable/reactivate and sign-in-limit reset, and `.xlsx`/CSV bulk import
   with column mapping, preview, row-level conflicts and an idempotent atomic commit.
+- **Question bank (admin workflow slice 2):** draft questions with code blocks and
+  2–6 options, edit-conflict detection, student-view and answer previews, explicit
+  activation, new numbered versions for changes, retirement, filtering, active supply
+  per topic, and all-or-nothing [JSON import](docs/question-import.md).
 
-Question authoring, assessments, the exam engine, student dashboard, readiness
+Assessments and sets, the exam engine, student dashboard, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
 student's name, admission number or login email is not built yet. Liveness only
 proves the application can respond; it does not certify exam readiness.

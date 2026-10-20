@@ -1,8 +1,9 @@
 # Admin workflow: registration to released results
 
-Status: implementation plan, 13 October 2026; updated 14 October 2026. Slice 1
-(owner sign-in, roster, manual add, disable/reactivate and bulk import) is
-implemented. Profile/email correction for conflicting rows and slices 2-5 are not.
+Status: implementation plan, 13 October 2026; updated 20 October 2026. Slice 1
+(owner sign-in, roster, manual add, disable/reactivate and bulk import) and slice 2
+(question bank and JSON import) are implemented. Profile/email correction for
+conflicting rows and slices 3-5 are not.
 This plan follows
 [the specification](../SPECIFICATION.md) and the existing Prisma schema.
 

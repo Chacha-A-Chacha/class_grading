@@ -18,7 +18,7 @@ Examples: "Cut form submissions to one per address every four hours", "Stop send
 
 # Project rules
 
-- Requirements: `SPECIFICATION.md`. Admin screens: `docs/admin-workflow.md`. Schema rationale: `docs/database-design.md`. Hot-path and deployment rules: `docs/performance.md`. Open security items: `docs/security-baseline.md`.
+- Requirements: `SPECIFICATION.md`. Admin screens: `docs/admin-workflow.md`. Question import format: `docs/question-import.md`. Schema rationale: `docs/database-design.md`. Hot-path and deployment rules: `docs/performance.md`. Open security items: `docs/security-baseline.md`.
 - Schema changes go through new Prisma migrations. Never edit an applied migration or use `db push`; triggers, CHECKs and partial indexes live in migration SQL.
 - Database tests need `TEST_DATABASE_URL` pointing at a separate database (locally `class_grading_test`), never the app database.
 - Run `npm run check`, `npm run test:unit` and `npm run test:db` before declaring work done; commit `package-lock.json` with dependency changes.
