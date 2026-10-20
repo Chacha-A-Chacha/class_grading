@@ -15,7 +15,7 @@ This specification defines the first release for the development team. It replac
 | Application | Next.js App Router with TypeScript; UI and server APIs in one application. |
 | Database | PostgreSQL, accessed through Prisma ORM. Prisma is not the database server. |
 | Hosting | Docker Compose on a Linux host, with Caddy terminating HTTPS. |
-| Exam format | Single-correct-answer MCQs with text and code in prompts and options. |
+| Exam format | Multiple-choice questions with text and code in prompts and options: single-answer, or select-all-that-apply scored all-or-nothing (added 20 October 2026). |
 | Attempts | One authorised attempt initially; an admin may authorise a replacement. |
 | Timing and navigation | One total timer; free navigation and review before submission. |
 | Integrity | Warnings and admin review only. No automatic misconduct penalties. |
@@ -128,7 +128,7 @@ Provide accessible keyboard navigation, semantic radio groups, readable code wit
 
 ### Question records and review
 
-Each question has a stable ID and immutable numbered versions. A version contains prompt, optional code, language, execution context, learning objective, topic tags, difficulty label, expected answering time, two to six options, one correct option, explanation, activation metadata; authoring actions are attributed through the audit log. Each option has a stable ID and text or code content. The runtime context must resolve relevant JavaScript ambiguity, such as browser versus Node.js and script versus module.
+Each question has a stable ID and immutable numbered versions. A version contains prompt, optional code, language, execution context, learning objective, topic tags, difficulty label, expected answering time, two to six options, an answer mode (one correct option, or select all that apply with three to six options and at least one correct), explanation, activation metadata; authoring actions are attributed through the audit log. Each option has a stable ID and text or code content. The runtime context must resolve relevant JavaScript ambiguity, such as browser versus Node.js and script versus module.
 
 The workflow is `DRAFT` → `ACTIVE` → `RETIRED`. The owner reviews each question and explicitly activates it; a second reviewer is not required. Record activation and privileged changes in the audit log. Changing assessed content creates a new version. Render code as escaped text; prohibit executable HTML in question content. Avoid dependent labels such as *Both A and B* or *All of the above* so option order can be shuffled safely.
 
@@ -289,7 +289,7 @@ The server supplies `acceptedAt`, `revision` and `status`. Never accept score, `
 
 ### Deterministic scoring
 
-Each included question is worth one point. A correct selected option earns one; an incorrect or unanswered question earns zero. Percentage equals correct answers divided by included questions times 100. Compare the unrounded percentage to the published pass percentage; round only the displayed value. If all questions are excluded, mark the result ungradable and require a replacement assessment.
+Each included question is worth one point. A correct selected option earns one; an incorrect or unanswered question earns zero. A select-all-that-apply question earns one only when the selected set equals the correct set exactly; any missing or extra option earns zero. Percentage equals correct answers divided by included questions times 100. Compare the unrounded percentage to the published pass percentage; round only the displayed value. If all questions are excluded, mark the result ungradable and require a replacement assessment.
 
 Score against the frozen question versions and realised option IDs. Persist score revisions so historical results remain explainable. When an admin excludes a faulty item, exclude that version from every affected attempt in the assessment and recalculate the denominator. Other sets remain unchanged. Show this difference during review because it may affect comparability.
 

@@ -7,29 +7,50 @@
       "language": "javascript",
       "runtimeContext": "Node.js 24, CommonJS script",
       "objective": "Trace loop control with continue",
-      "topics": ["Loops", "Control flow"],
+      "topics": [
+        "Loops",
+        "Control flow"
+      ],
       "difficulty": "EASY",
       "expectedSeconds": 60,
       "explanation": "The loop skips 2 because it is even, so total is 1 + 3 = 4.",
       "options": [
-        { "content": "4", "correct": true },
-        { "content": "6" },
-        { "content": "3" },
-        { "content": "1" }
+        {
+          "content": "4",
+          "correct": true
+        },
+        {
+          "content": "6"
+        },
+        {
+          "content": "3"
+        },
+        {
+          "content": "1"
+        }
       ]
     },
     {
       "kind": "THEORY",
       "prompt": "Which statement about `const` in JavaScript is true?",
       "objective": "Distinguish binding immutability from value immutability",
-      "topics": ["Variables"],
+      "topics": [
+        "Variables"
+      ],
       "difficulty": "MEDIUM",
       "expectedSeconds": 45,
       "explanation": "`const` prevents reassigning the binding, but an object it refers to can still be changed.",
       "options": [
-        { "content": "The variable cannot be reassigned, but an object it refers to can still be modified.", "correct": true },
-        { "content": "The value it refers to can never change." },
-        { "content": "It behaves exactly like `var`." }
+        {
+          "content": "The variable cannot be reassigned, but an object it refers to can still be modified.",
+          "correct": true
+        },
+        {
+          "content": "The value it refers to can never change."
+        },
+        {
+          "content": "It behaves exactly like `var`."
+        }
       ]
     },
     {
@@ -39,13 +60,63 @@
       "language": "javascript",
       "runtimeContext": "Node.js 24, ES module",
       "objective": "Explain block scoping in closures",
-      "topics": ["Closures", "Loops"],
+      "topics": [
+        "Closures",
+        "Loops"
+      ],
       "difficulty": "HARD",
       "expectedSeconds": 90,
       "explanation": "`let` creates a new binding for each iteration, so each callback sees its own value of i.",
       "options": [
-        { "kind": "CODE", "content": "for (let i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 10);\n}", "correct": true },
-        { "kind": "CODE", "content": "for (var i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 10);\n}" }
+        {
+          "kind": "CODE",
+          "content": "for (let i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 10);\n}",
+          "correct": true
+        },
+        {
+          "kind": "CODE",
+          "content": "for (var i = 0; i < 3; i++) {\n  setTimeout(() => console.log(i), 10);\n}"
+        }
+      ]
+    },
+    {
+      "kind": "CODE",
+      "answerMode": "MULTIPLE",
+      "prompt": "Which of these values are falsy? Select all that apply.",
+      "code": "const values = [0, \"0\", \"\", [], null];",
+      "language": "javascript",
+      "runtimeContext": "Node.js 24, ES module",
+      "objective": "Predict how values convert to booleans in conditions",
+      "topics": [
+        "Variables"
+      ],
+      "difficulty": "MEDIUM",
+      "expectedSeconds": 75,
+      "explanation": "0, the empty string and null are falsy. \"0\" is a non-empty string, so it is truthy, and every array, even an empty one, is an object and therefore truthy.",
+      "options": [
+        {
+          "kind": "CODE",
+          "content": "0",
+          "correct": true
+        },
+        {
+          "kind": "CODE",
+          "content": "\"0\""
+        },
+        {
+          "kind": "CODE",
+          "content": "\"\"",
+          "correct": true
+        },
+        {
+          "kind": "CODE",
+          "content": "[]"
+        },
+        {
+          "kind": "CODE",
+          "content": "null",
+          "correct": true
+        }
       ]
     }
   ]

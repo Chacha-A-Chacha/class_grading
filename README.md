@@ -60,7 +60,7 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   audited disable/reactivate and sign-in-limit reset, and `.xlsx`/CSV bulk import
   with column mapping, preview, row-level conflicts and an idempotent atomic commit.
 - **Question bank (admin workflow slice 2):** draft questions with code blocks and
-  2–6 options, edit-conflict detection, student-view and answer previews, explicit
+  2–6 options, single-answer or select-all-that-apply (scored all-or-nothing), edit-conflict detection, student-view and answer previews, explicit
   activation, new numbered versions for changes, retirement, filtering, active supply
   per topic, and all-or-nothing [JSON import](docs/question-import.md).
 - **Assessment setup (admin workflow slice 3):** draft details in East Africa Time,

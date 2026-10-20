@@ -99,6 +99,20 @@ connections per process, count web and worker pools together, and measure
 `EXPLAIN (ANALYZE, BUFFERS)` on representative data before tuning further. There
 is no claim of 300-student load validation at this stage.
 
+## Multiple-select questions
+
+Added 20 October 2026 (`20261020120000_multiple_select`). `QuestionVersion.answerMode` is
+`SINGLE` or `MULTIPLE`; `QuestionAnswerKey` has one row per correct option, keyed by
+`(questionVersionId, correctOptionId)`. Activation requires exactly one key for `SINGLE`, and
+at least one key with three to six options for `MULTIPLE`.
+
+A multiple-select answer is stored as a sorted, distinct `selectedOptionIds` array on
+`AttemptAnswer` and `AnswerMutation`, with `selectedOptionId` null; single answers keep using
+`selectedOptionId` with an empty array. Arrays cannot carry foreign keys, so a trigger checks
+that every selected ID was shown for that attempt question and that the shape matches the
+question's mode. Scoring is all-or-nothing: the point is earned only when the selected set
+equals the keyed set.
+
 ## Database rules versus service rules
 
 The SQL integrity migration enforces the sole admin, one active attempt, positive

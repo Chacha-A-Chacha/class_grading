@@ -19,6 +19,7 @@ with a `questions` array.
 | Field | Required | Rules |
 | --- | --- | --- |
 | `kind` | yes | `"CODE"` or `"THEORY"`. |
+| `answerMode` | no | `"SINGLE"` (default): exactly one correct option. `"MULTIPLE"`: select all that apply, scored all-or-nothing. |
 | `prompt` | yes | Up to 5,000 characters. Plain text; HTML is shown as text, never run. |
 | `code` | for `CODE` | Up to 10,000 characters. Indentation is kept exactly; use `\n` for new lines. |
 | `language` | for `CODE` | Up to 40 characters, e.g. `"javascript"`. |
@@ -28,7 +29,7 @@ with a `questions` array.
 | `difficulty` | yes | `"EASY"`, `"MEDIUM"` or `"HARD"`. |
 | `expectedSeconds` | yes | Whole number from 10 to 1800. |
 | `explanation` | yes | Up to 5,000 characters. Shown to students only after results are released. |
-| `options` | yes | 2–6 options; exactly one has `"correct": true`. |
+| `options` | yes | 2–6 options. `SINGLE`: exactly one has `"correct": true`. `MULTIPLE`: 3–6 options and at least one correct. |
 
 Each option:
 
@@ -36,7 +37,10 @@ Each option:
 | --- | --- | --- |
 | `content` | yes | Up to 2,000 characters; options must differ from each other. |
 | `kind` | no | `"TEXT"` (default) or `"CODE"` for a code block. |
-| `correct` | no | `true` on exactly one option; omit or `false` on the rest. |
+| `correct` | no | `true` on the correct option (`SINGLE`) or on every correct option (`MULTIPLE`); omit or `false` on the rest. |
+
+Multiple-select questions earn the point only when a student selects exactly the correct
+set: a missing or extra choice scores zero, and there is no negative marking.
 
 Options are shuffled for each student, so answers that refer to other options
 ("All of the above", "None of the above", "Both A and B") are rejected.
