@@ -19,11 +19,11 @@ export function isRetryable(error: unknown): boolean {
   // P2024: pool wait timed out. P2028: interactive transaction could not start or timed out.
   return db.code === "P2034" || db.code === "P2024" || db.code === "P2028" || RETRYABLE_SQLSTATES.has(String(db.meta?.driverAdapterError?.cause?.originalCode));
 }
-export function endpoint(action: (request: Request) => Promise<Response>, mutation = true) {
-  return async (request: Request) => {
+export function endpoint<Context = unknown>(action: (request: Request, context: Context) => Promise<Response>, mutation = true) {
+  return async (request: Request, context: Context) => {
     try {
       if (mutation) requireSameOrigin(request);
-      return await action(request);
+      return await action(request, context);
     } catch (error) {
       // Proxy assigns a server-generated ID to every API request; reuse it for correlation.
       const requestId = request.headers.get("x-request-id") ?? randomUUID();
@@ -59,8 +59,8 @@ export async function readBody(request: Request, limit: number) {
   }
   return Buffer.concat(chunks);
 }
-export async function bodyJson(request: Request) {
+export async function bodyJson(request: Request, limit = 32_768) {
   if (!request.headers.get("content-type")?.startsWith("application/json")) throw new AppError("INVALID_INPUT", "Expected a JSON request.");
-  try { return JSON.parse((await readBody(request, 32_768)).toString("utf8")) as unknown; }
+  try { return JSON.parse((await readBody(request, limit)).toString("utf8")) as unknown; }
   catch (error) { if (error instanceof AppError) throw error; throw new AppError("INVALID_INPUT", "Invalid JSON."); }
 }
