@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { strToU8, zipSync } from "fflate";
 import { csvCell, mappingSchema, normalizeRows, suggestMapping } from "../../src/shared/students";
-import { readWorkbook } from "../../src/server/students/workbook";
+import { numericText, readWorkbook } from "../../src/server/students/workbook";
 
 test("registration mapping selects the primary email and ignores GitHub", () => {
   const headers = ["Email Address", "GitHub username", "Email on your GitHub account", "Full name as registered with the school", "Admission number", "Confirm admission number"];
@@ -39,4 +39,11 @@ test("CSV reports neutralize spreadsheet formulas and preserve quotes", () => {
   assert.equal(csvCell('=HYPERLINK("bad")'), '"\'=HYPERLINK(""bad"")"');
   assert.equal(csvCell("  +123"), '"\'  +123"');
   assert.equal(csvCell("ordinary"), '"ordinary"');
+});
+test("numeric workbook cells keep whole numbers as plain digits and never round others", () => {
+  assert.equal(numericText("2521.0"), "2521");
+  assert.equal(numericText("2521"), "2521");
+  assert.equal(numericText("2.521E3"), "2521");
+  assert.equal(numericText("12.5"), "12.5");
+  assert.equal(numericText("123456789012345678901"), "123456789012345678901");
 });

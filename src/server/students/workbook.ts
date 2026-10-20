@@ -43,6 +43,15 @@ function inspectZip(buffer: Buffer) {
   unzip.register(UnzipInflate);
   for (let offset = 0; offset < buffer.length; offset += 256) unzip.push(buffer.subarray(offset, offset + 256), offset + 256 >= buffer.length);
 }
+/**
+ * Numeric cells arrive as raw XML text such as "2521.0" or "2.521E3" (Google Sheets exports
+ * whole numbers with a decimal). Whole numbers become plain digits so admission numbers
+ * match; anything else keeps its original text rather than being rounded.
+ */
+export function numericText(value: string): string {
+  const n = Number(value);
+  return Number.isSafeInteger(n) && /^-?\d+(\.\d+)?(e[+-]?\d+)?$/i.test(value.trim()) ? String(n) : value;
+}
 export async function readWorkbook(buffer: Buffer, filename: string): Promise<Sheet[]> {
   if (!buffer.length || buffer.length > MAX_UPLOAD) invalid("Choose a file no larger than 5 MB.");
   try {
@@ -53,7 +62,7 @@ export async function readWorkbook(buffer: Buffer, filename: string): Promise<Sh
       sheets = [{ name: "CSV", data }];
     } else if (/\.xlsx$/i.test(filename)) {
       inspectZip(buffer);
-      const parsed = await readXlsxFile(buffer, { parseNumber: (value: string) => value });
+      const parsed = await readXlsxFile(buffer, { parseNumber: numericText });
       sheets = parsed.map((s) => ({ name: s.sheet, data: s.data }));
     } else invalid("Use an .xlsx workbook or UTF-8 .csv file.");
     if (sheets.length > 10) invalid("Use a workbook with at most 10 sheets.");
