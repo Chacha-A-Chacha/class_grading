@@ -40,12 +40,12 @@ async function topicIds(tx: Tx, names: string[]): Promise<Map<string, string>> {
 
 async function writeContent(tx: Tx, versionId: string, q: Question, topics: Map<string, string>) {
   await tx.questionOption.createMany({ data: q.options.map((o, i) => ({ questionVersionId: versionId, position: i + 1, kind: o.kind, content: o.content })) });
-  const correctPosition = q.options.findIndex((o) => o.correct) + 1;
-  const correct = await tx.questionOption.findUniqueOrThrow({ where: { questionVersionId_position: { questionVersionId: versionId, position: correctPosition } }, select: { id: true } });
-  await tx.questionAnswerKey.create({ data: { questionVersionId: versionId, correctOptionId: correct.id } });
+  const correctPositions = q.options.flatMap((o, i) => (o.correct ? [i + 1] : []));
+  const correct = await tx.questionOption.findMany({ where: { questionVersionId: versionId, position: { in: correctPositions } }, select: { id: true } });
+  await tx.questionAnswerKey.createMany({ data: correct.map((c) => ({ questionVersionId: versionId, correctOptionId: c.id })) });
   await tx.questionTopic.createMany({ data: q.topics.map((t) => ({ questionVersionId: versionId, topicId: topics.get(t.toLowerCase())! })) });
 }
-const fields = (q: Question) => ({ kind: q.kind, prompt: q.prompt, code: q.code, language: q.language, runtimeContext: q.runtimeContext, objective: q.objective, difficulty: q.difficulty, expectedSeconds: q.expectedSeconds, explanation: q.explanation });
+const fields = (q: Question) => ({ kind: q.kind, answerMode: q.answerMode, prompt: q.prompt, code: q.code, language: q.language, runtimeContext: q.runtimeContext, objective: q.objective, difficulty: q.difficulty, expectedSeconds: q.expectedSeconds, explanation: q.explanation });
 
 async function insertDraft(tx: Tx, q: Question, topics: Map<string, string>) {
   const question = await tx.question.create({ data: {}, select: { id: true } });
@@ -101,17 +101,16 @@ export async function reviseQuestion(db: PrismaClient, sessionId: string, questi
     const admin = await assertAdmin(tx, sessionId);
     const question = await lockQuestion(tx, questionId);
     if (question.retiredAt) throw new AppError("RETIRED", "This question is retired. Create a new question instead.", 409);
-    const latest = await tx.questionVersion.findFirstOrThrow({ where: { questionId }, orderBy: { version: "desc" }, include: { options: { orderBy: { position: "asc" } }, answerKey: true, topics: { select: { topicId: true } } } });
+    const latest = await tx.questionVersion.findFirstOrThrow({ where: { questionId }, orderBy: { version: "desc" }, include: { options: { orderBy: { position: "asc" } }, answerKeys: true, topics: { select: { topicId: true } } } });
     if (latest.status === "DRAFT") return { versionId: latest.id, created: false };
-    const { id: _id, version, recordVersion: _r, status: _s, activatedAt: _a, createdAt: _c, updatedAt: _u, options, answerKey, topics, ...content } = latest;
+    const { id: _id, version, recordVersion: _r, status: _s, activatedAt: _a, createdAt: _c, updatedAt: _u, options, answerKeys, topics, ...content } = latest;
     void _id; void _r; void _s; void _a; void _c; void _u;
     const draft = await tx.questionVersion.create({ data: { ...content, version: version + 1 }, select: { id: true } });
     await tx.questionOption.createMany({ data: options.map((o) => ({ questionVersionId: draft.id, position: o.position, kind: o.kind, content: o.content })) });
-    const correctPosition = options.find((o) => o.id === answerKey?.correctOptionId)?.position;
-    if (correctPosition) {
-      const correct = await tx.questionOption.findUniqueOrThrow({ where: { questionVersionId_position: { questionVersionId: draft.id, position: correctPosition } }, select: { id: true } });
-      await tx.questionAnswerKey.create({ data: { questionVersionId: draft.id, correctOptionId: correct.id } });
-    }
+    const keyed = new Set(answerKeys.map((k) => k.correctOptionId));
+    const correctPositions = options.filter((o) => keyed.has(o.id)).map((o) => o.position);
+    const copied = await tx.questionOption.findMany({ where: { questionVersionId: draft.id, position: { in: correctPositions } }, select: { id: true } });
+    await tx.questionAnswerKey.createMany({ data: copied.map((c) => ({ questionVersionId: draft.id, correctOptionId: c.id })) });
     await tx.questionTopic.createMany({ data: topics.map((t) => ({ questionVersionId: draft.id, topicId: t.topicId })) });
     await tx.auditLog.create({ data: { actorId: admin.userId, action: "QUESTION_REVISION_STARTED", targetType: "Question", targetId: questionId, reason: "Owner started a new version of the question.", metadata: { version: version + 1 } } });
     return { versionId: draft.id, created: true };
@@ -220,12 +219,13 @@ export async function topicSupply(db: PrismaClient) {
 }
 
 export async function getQuestion(db: PrismaClient, questionId: string) {
-  return db.question.findUnique({ where: { id: questionId }, include: { versions: { orderBy: { version: "desc" }, include: { options: { orderBy: { position: "asc" } }, answerKey: true, topics: { include: { topic: true }, orderBy: { topic: { name: "asc" } } } } } } });
+  return db.question.findUnique({ where: { id: questionId }, include: { versions: { orderBy: { version: "desc" }, include: { options: { orderBy: { position: "asc" } }, answerKeys: true, topics: { include: { topic: true }, orderBy: { topic: { name: "asc" } } } } } } });
 }
 export type QuestionDetail = NonNullable<Awaited<ReturnType<typeof getQuestion>>>;
 export type VersionDetail = QuestionDetail["versions"][number];
 
 /** Converts a stored version back into the editor/import shape. */
 export function toInput(v: VersionDetail): Question {
-  return { kind: v.kind, prompt: v.prompt, code: v.code, language: v.language, runtimeContext: v.runtimeContext, objective: v.objective, topics: v.topics.map((t) => t.topic.name), difficulty: v.difficulty, expectedSeconds: v.expectedSeconds, explanation: v.explanation, options: v.options.map((o) => ({ kind: o.kind, content: o.content, correct: o.id === v.answerKey?.correctOptionId })) };
+  const keyed = new Set(v.answerKeys.map((k) => k.correctOptionId));
+  return { kind: v.kind, answerMode: v.answerMode, prompt: v.prompt, code: v.code, language: v.language, runtimeContext: v.runtimeContext, objective: v.objective, topics: v.topics.map((t) => t.topic.name), difficulty: v.difficulty, expectedSeconds: v.expectedSeconds, explanation: v.explanation, options: v.options.map((o) => ({ kind: o.kind, content: o.content, correct: keyed.has(o.id) })) };
 }

@@ -43,3 +43,11 @@ test("import reports errors per question, numbered from 1", () => {
   assert.deepEqual(report.map((r) => [r.index, r.errors.length > 0]), [[1, false], [2, true], [3, true]]);
   assert.ok(report[1].errors.some((e) => e.startsWith("prompt:")));
 });
+test("multiple-select needs at least one correct option and three options", () => {
+  const multi = { ...theory, answerMode: "MULTIPLE", options: [{ content: "A", correct: true }, { content: "B", correct: true }, { content: "C" }] };
+  assert.deepEqual(issues(multi), []);
+  assert.ok(issues({ ...multi, options: multi.options.map((o) => ({ ...o, correct: false })) }).some((m) => /at least one option/.test(m)));
+  assert.ok(issues({ ...multi, options: multi.options.slice(0, 2) }).some((m) => /at least three options/.test(m)));
+  assert.ok(issues({ ...multi, answerMode: "SINGLE" }).some((m) => /exactly one/.test(m)), "two correct options are invalid for single-answer");
+  assert.equal(questionSchema.parse(theory).answerMode, "SINGLE", "single-answer is the default");
+});

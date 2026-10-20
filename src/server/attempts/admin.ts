@@ -96,7 +96,7 @@ export async function liveStatus(db: PrismaClient, assessmentId: string) {
       attempts: { orderBy: { attemptNumber: "desc" }, select: { id: true, attemptNumber: true, status: true, startedAt: true, expiresAt: true, lastSeenAt: true, submittedAt: true, set: { select: { label: true } } } },
     } }),
     db.$queryRaw<{ attemptId: string; answered: bigint; total: bigint }[]>`
-      SELECT q."attemptId", count(*) FILTER (WHERE a."selectedOptionId" IS NOT NULL) AS answered, count(*) AS total
+      SELECT q."attemptId", count(*) FILTER (WHERE a."selectedOptionId" IS NOT NULL OR cardinality(a."selectedOptionIds") > 0) AS answered, count(*) AS total
       FROM "AttemptQuestion" q JOIN "Attempt" t ON t.id = q."attemptId" LEFT JOIN "AttemptAnswer" a ON a."attemptQuestionId" = q.id
       WHERE t."assessmentId" = ${assessmentId}::uuid GROUP BY q."attemptId"`,
     db.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`,
@@ -113,9 +113,9 @@ export async function attemptDetail(db: PrismaClient, attemptId: string) {
     scores: { orderBy: { scoringRevision: "desc" } },
     questions: { orderBy: { setItem: { position: "asc" } }, select: {
       id: true, markedForReview: true, answer: true,
-      setItem: { select: { position: true, questionVersion: { select: { questionId: true, version: true, prompt: true, kind: true, answerKey: { select: { correctOptionId: true } } } } } },
+      setItem: { select: { position: true, questionVersion: { select: { questionId: true, version: true, prompt: true, kind: true, answerMode: true, answerKeys: { select: { correctOptionId: true } } } } } },
       options: { orderBy: { displayPosition: "asc" }, select: { displayPosition: true, option: { select: { id: true, kind: true, content: true } } } },
-      mutations: { orderBy: [{ acceptedAt: "asc" }, { id: "asc" }], select: { id: true, selectedOptionId: true, resultRevision: true, acceptedAt: true, sessionGeneration: true } },
+      mutations: { orderBy: [{ acceptedAt: "asc" }, { id: "asc" }], select: { id: true, selectedOptionId: true, selectedOptionIds: true, resultRevision: true, acceptedAt: true, sessionGeneration: true } },
     } },
   } });
   if (!attempt) return null;

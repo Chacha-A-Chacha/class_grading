@@ -23,6 +23,12 @@ enum QuestionKind {
   THEORY
 }
 
+/// SINGLE: exactly one correct option. MULTIPLE: select all that apply, scored all-or-nothing.
+enum AnswerMode {
+  SINGLE
+  MULTIPLE
+}
+
 enum ContentKind {
   TEXT
   CODE
@@ -195,6 +201,7 @@ model QuestionVersion {
   recordVersion   Int                @default(1)
   status          QuestionStatus     @default(DRAFT)
   kind            QuestionKind
+  answerMode      AnswerMode         @default(SINGLE)
   prompt          String             @db.Text
   code            String?            @db.Text
   language        String?            @db.VarChar(40)
@@ -208,7 +215,7 @@ model QuestionVersion {
   updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
   question        Question           @relation(fields: [questionId], references: [id], onDelete: Restrict)
   options         QuestionOption[]
-  answerKey       QuestionAnswerKey?
+  answerKeys      QuestionAnswerKey[]
   topics          QuestionTopic[]
   setItems        SetItem[]
   exclusions      ItemExclusion[]
@@ -234,11 +241,13 @@ model QuestionOption {
 
 /// Kept separate from question content; never include in student DTOs.
 model QuestionAnswerKey {
-  questionVersionId String          @id @db.Uuid
+  questionVersionId String          @db.Uuid
   correctOptionId   String          @db.Uuid
   questionVersion   QuestionVersion @relation(fields: [questionVersionId], references: [id], onDelete: Restrict)
   correctOption     QuestionOption  @relation(fields: [correctOptionId, questionVersionId], references: [id, questionVersionId], onDelete: Restrict)
 
+  // One row per correct option: one for SINGLE, one or more for MULTIPLE (enforced on activation).
+  @@id([questionVersionId, correctOptionId])
   @@index([correctOptionId, questionVersionId])
 }
 
@@ -434,6 +443,9 @@ model AttemptOption {
 model AttemptAnswer {
   attemptQuestionId String          @id @db.Uuid
   selectedOptionId  String?         @db.Uuid
+  // MULTIPLE questions: the selected set (sorted, distinct); empty for SINGLE. SQL triggers
+  // check every ID was shown for this question.
+  selectedOptionIds String[]        @default([]) @db.Uuid
   revision          Int
   acceptedAt        DateTime        @db.Timestamptz(3)
   sessionGeneration Int
@@ -464,6 +476,7 @@ model AnswerMutation {
   attemptQuestionId String          @db.Uuid
   clientMutationId  String          @db.Uuid
   selectedOptionId  String?         @db.Uuid
+  selectedOptionIds String[]        @default([]) @db.Uuid
   sessionGeneration Int
   sequence          Int
   resultRevision    Int

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 // One shape for the editor, the API and JSON import (docs/question-import.md).
 export const KINDS = ["CODE", "THEORY"] as const;
+/** SINGLE: exactly one correct option. MULTIPLE: select all that apply, scored all-or-nothing. */
+export const ANSWER_MODES = ["SINGLE", "MULTIPLE"] as const;
 export const DIFFICULTIES = ["EASY", "MEDIUM", "HARD"] as const;
 export const CONTENT_KINDS = ["TEXT", "CODE"] as const;
 export const STATUSES = ["DRAFT", "ACTIVE", "RETIRED"] as const;
@@ -24,6 +26,7 @@ export const optionSchema = z.object({
 
 export const questionSchema = z.object({
   kind: z.enum(KINDS),
+  answerMode: z.enum(ANSWER_MODES).default("SINGLE"),
   prompt: text("Prompt", 5000),
   code: codeText(10_000),
   language: optionalText(40),
@@ -41,7 +44,11 @@ export const questionSchema = z.object({
     if (!q.runtimeContext) ctx.addIssue({ code: "custom", path: ["runtimeContext"], message: "State the runtime context, e.g. Node.js 24, CommonJS script." });
   }
   const correct = q.options.filter((o) => o.correct).length;
-  if (correct !== 1) ctx.addIssue({ code: "custom", path: ["options"], message: "Mark exactly one option as correct." });
+  if (q.answerMode === "SINGLE" && correct !== 1) ctx.addIssue({ code: "custom", path: ["options"], message: "Mark exactly one option as correct." });
+  if (q.answerMode === "MULTIPLE") {
+    if (correct < 1) ctx.addIssue({ code: "custom", path: ["options"], message: "Mark at least one option as correct." });
+    if (q.options.length < 3) ctx.addIssue({ code: "custom", path: ["options"], message: "Multiple-select questions need at least three options." });
+  }
   const seen = new Set<string>();
   q.options.forEach((option, index) => {
     const key = `${option.kind}:${option.content.trim().toLowerCase()}`;
@@ -73,3 +80,4 @@ export function validateImport(items: unknown[]): { valid: Question[]; report: I
 export const STATUS_LABEL: Record<(typeof STATUSES)[number], string> = { DRAFT: "Draft", ACTIVE: "Active", RETIRED: "Retired" };
 export const DIFFICULTY_LABEL: Record<(typeof DIFFICULTIES)[number], string> = { EASY: "Easy", MEDIUM: "Medium", HARD: "Hard" };
 export const KIND_LABEL: Record<(typeof KINDS)[number], string> = { CODE: "Code", THEORY: "Theory" };
+export const ANSWER_MODE_LABEL: Record<(typeof ANSWER_MODES)[number], string> = { SINGLE: "One correct answer", MULTIPLE: "Select all that apply" };

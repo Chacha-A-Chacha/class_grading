@@ -55,8 +55,8 @@ async function published(userIds = students.map((s) => s.id), patch = {}) {
 }
 const start = (s: { id: string; session: string }, assessmentId: string, key = randomUUID()) => startAttempt(db, s.id, s.session, assessmentId, key, "1");
 async function correctOption(attemptQuestionId: string) {
-  const q = await db.attemptQuestion.findUniqueOrThrow({ where: { id: attemptQuestionId }, select: { setItem: { select: { questionVersion: { select: { answerKey: true } } } } } });
-  return q.setItem.questionVersion.answerKey!.correctOptionId;
+  const q = await db.attemptQuestion.findUniqueOrThrow({ where: { id: attemptQuestionId }, select: { setItem: { select: { questionVersion: { select: { answerKeys: true } } } } } });
+  return q.setItem.questionVersion.answerKeys[0].correctOptionId;
 }
 const mutation = (attemptQuestionId: string, selectedOptionId: string | null, sequence: number): Mutation => ({ attemptQuestionId, selectedOptionId, sequence, sessionGeneration: 1, clientMutationId: randomUUID() });
 

@@ -41,7 +41,7 @@ test("drafts store options, key and case-insensitive topics; students cannot aut
   const detail = (await getQuestion(db, first.questionId))!;
   const v = detail.versions[0];
   assert.equal(v.status, "DRAFT"); assert.equal(v.options.length, 3);
-  assert.equal(v.options.find((o) => o.id === v.answerKey?.correctOptionId)?.content, "2");
+  assert.deepEqual(v.answerKeys.map((k) => v.options.find((o) => o.id === k.correctOptionId)?.content), ["2"]);
   assert.deepEqual((await getQuestion(db, second.questionId))!.versions[0].topics.map((t) => t.topic.name), ["Loops"]);
 });
 
@@ -69,7 +69,7 @@ test("activation freezes content; a revision replaces the active version only wh
   assert.deepEqual(await reviseQuestion(db, sessionId, questionId), { versionId: revision.versionId, created: false });
   let detail = (await getQuestion(db, questionId))!;
   const draft = detail.versions.find((v) => v.id === revision.versionId)!;
-  assert.equal(draft.version, 2); assert.equal(draft.options.length, 3); assert.ok(draft.answerKey);
+  assert.equal(draft.version, 2); assert.equal(draft.options.length, 3); assert.equal(draft.answerKeys.length, 1);
   assert.equal(detail.versions.find((v) => v.status === "ACTIVE")?.version, 1);
 
   await updateDraft(db, sessionId, draft.id, 1, q({ prompt: "Revised" }));

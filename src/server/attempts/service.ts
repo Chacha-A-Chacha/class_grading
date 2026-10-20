@@ -1,6 +1,6 @@
 import { createHash, randomInt } from "node:crypto";
 import { Prisma, type PrismaClient } from "../../generated/prisma/client";
-import type { AttemptState, AttemptView, Mutation, MutationReceipt, SubmitResult } from "../../shared/attempts";
+import { type AttemptState, type AttemptView, type Mutation, type MutationReceipt, type SubmitResult, normalizeSelection } from "../../shared/attempts";
 import { now } from "../auth/service";
 import { AppError } from "../errors";
 import { withRetry } from "../retry";
@@ -36,15 +36,24 @@ async function resolveOverdue(tx: Tx, attempt: Locked, time: Date) {
  * (rawCorrect * 100 >= availablePoints * passPercent). Idempotent per scoring revision.
  */
 export async function scoreAttempt(tx: Tx, attemptId: string) {
-  const attempt = await tx.attempt.findUniqueOrThrow({ where: { id: attemptId }, select: { assessmentId: true, passPercent: true, questions: { select: { questionVersionId: true, answer: { select: { selectedOptionId: true } }, setItem: { select: { questionVersion: { select: { answerKey: { select: { correctOptionId: true } } } } } } } } } });
+  const attempt = await tx.attempt.findUniqueOrThrow({ where: { id: attemptId }, select: { assessmentId: true, passPercent: true, questions: { select: { questionVersionId: true, answer: { select: { selectedOptionId: true, selectedOptionIds: true } }, setItem: { select: { questionVersion: { select: { answerMode: true, answerKeys: { select: { correctOptionId: true } } } } } } } } } });
   const assessment = await tx.assessment.findUniqueOrThrow({ where: { id: attempt.assessmentId }, select: { scoringRevision: true, exclusions: { select: { questionVersionId: true } } } });
   const excluded = new Set(assessment.exclusions.map((e) => e.questionVersionId));
   const included = attempt.questions.filter((q) => !excluded.has(q.questionVersionId));
-  const rawCorrect = included.filter((q) => q.answer?.selectedOptionId && q.answer.selectedOptionId === q.setItem.questionVersion.answerKey?.correctOptionId).length;
+  const rawCorrect = included.filter((q) => isCorrect(q.setItem.questionVersion.answerMode, q.answer, q.setItem.questionVersion.answerKeys.map((k) => k.correctOptionId))).length;
   const availablePoints = included.length;
   const passed = availablePoints === 0 ? null : new Prisma.Decimal(rawCorrect * 100).gte(attempt.passPercent.mul(availablePoints));
   await tx.scoreRevision.createMany({ data: [{ attemptId, scoringRevision: assessment.scoringRevision, rawCorrect, availablePoints, passed }], skipDuplicates: true });
 }
+
+/** SINGLE: the one keyed option. MULTIPLE: exactly the keyed set, all-or-nothing. */
+export function isCorrect(mode: "SINGLE" | "MULTIPLE", answer: { selectedOptionId: string | null; selectedOptionIds: string[] } | null, keys: string[]) {
+  if (!answer) return false;
+  if (mode === "SINGLE") return !!answer.selectedOptionId && keys.length === 1 && answer.selectedOptionId === keys[0];
+  const chosen = new Set(answer.selectedOptionIds);
+  return chosen.size > 0 && chosen.size === keys.length && keys.every((k) => chosen.has(k));
+}
+const isAnswered = (a: { selectedOptionId: string | null; selectedOptionIds: string[] } | null | undefined) => !!a && (!!a.selectedOptionId || a.selectedOptionIds.length > 0);
 
 const state = (a: Locked, time: Date): AttemptState => ({ status: a.status, expiresAt: a.expiresAt.toISOString(), serverNow: time.toISOString(), generation: a.currentGeneration });
 
@@ -117,25 +126,31 @@ export async function startAttempt(db: PrismaClient, userId: string, userSession
 }
 
 /** Validates and applies mutations under the attempt lock (A03, A04, A08). */
-async function applyMutations(tx: Tx, attempt: Locked, time: Date, mutations: Mutation[]): Promise<MutationReceipt[]> {
-  if (!mutations.length) return [];
+async function applyMutations(tx: Tx, attempt: Locked, time: Date, input: Mutation[]): Promise<MutationReceipt[]> {
+  if (!input.length) return [];
+  const mutations = input.map((m) => ({ ...m, selectedOptionIds: normalizeSelection(m.selectedOptionIds) }));
   const questionIds = [...new Set(mutations.map((m) => m.attemptQuestionId))];
-  const questions = await tx.attemptQuestion.findMany({ where: { id: { in: questionIds }, attemptId: attempt.id }, select: { id: true, options: { select: { questionOptionId: true } }, answer: true } });
+  const questions = await tx.attemptQuestion.findMany({ where: { id: { in: questionIds }, attemptId: attempt.id }, select: { id: true, options: { select: { questionOptionId: true } }, answer: true, setItem: { select: { questionVersion: { select: { answerMode: true } } } } } });
   const byId = new Map(questions.map((q) => [q.id, q]));
   // Reject the whole batch before writing anything if any part is invalid.
   for (const m of mutations) {
     const q = byId.get(m.attemptQuestionId);
     if (!q) throw new AppError("INVALID_QUESTION", "An answer refers to a question that is not part of this attempt.", 422);
-    if (m.selectedOptionId && !q.options.some((o) => o.questionOptionId === m.selectedOptionId)) throw new AppError("INVALID_OPTION", "An answer refers to an option that was not shown for that question.", 422);
+    const shown = new Set(q.options.map((o) => o.questionOptionId));
+    const multiple = q.setItem.questionVersion.answerMode === "MULTIPLE";
+    if (multiple ? m.selectedOptionId !== null || !m.selectedOptionIds : (m.selectedOptionIds?.length ?? 0) > 0) throw new AppError("INVALID_ANSWER", multiple ? "This question accepts a set of options." : "This question accepts one option.", 422);
+    if ((m.selectedOptionId && !shown.has(m.selectedOptionId)) || m.selectedOptionIds?.some((id) => !shown.has(id))) throw new AppError("INVALID_OPTION", "An answer refers to an option that was not shown for that question.", 422);
     if (m.sessionGeneration !== attempt.currentGeneration) throw new AppError("STALE_SESSION", "This exam is open in a newer session. Reload to continue there.", 409);
   }
   const existing = await tx.answerMutation.findMany({ where: { attemptId: attempt.id, clientMutationId: { in: mutations.map((m) => m.clientMutationId) } } });
   const receipts: MutationReceipt[] = [];
   for (const m of mutations) {
-    const payloadHash = createHash("sha256").update(JSON.stringify([m.attemptQuestionId, m.selectedOptionId, m.sessionGeneration, m.sequence])).digest("hex");
+    const selectedOptionIds = m.selectedOptionIds ?? [];
+    // Single-answer hashes are unchanged from before multiple-select existed.
+    const payloadHash = createHash("sha256").update(JSON.stringify([m.attemptQuestionId, m.selectedOptionId, m.sessionGeneration, m.sequence, ...(selectedOptionIds.length ? [selectedOptionIds] : [])])).digest("hex");
     const prior = existing.find((e) => e.clientMutationId === m.clientMutationId);
     const answer = byId.get(m.attemptQuestionId)!.answer;
-    const current = (status: MutationReceipt["status"]): MutationReceipt => ({ clientMutationId: m.clientMutationId, status, attemptQuestionId: m.attemptQuestionId, selectedOptionId: answer?.selectedOptionId ?? null, revision: answer?.revision ?? 0, acceptedAt: (answer?.acceptedAt ?? time).toISOString() });
+    const current = (status: MutationReceipt["status"]): MutationReceipt => ({ clientMutationId: m.clientMutationId, status, attemptQuestionId: m.attemptQuestionId, selectedOptionId: answer?.selectedOptionId ?? null, selectedOptionIds: answer?.selectedOptionIds ?? [], revision: answer?.revision ?? 0, acceptedAt: (answer?.acceptedAt ?? time).toISOString() });
     if (prior) {
       if (prior.payloadHash !== payloadHash) throw new AppError("MUTATION_CONFLICT", "An answer change was resent with different content.", 409);
       receipts.push(current("duplicate")); continue;
@@ -143,11 +158,11 @@ async function applyMutations(tx: Tx, attempt: Locked, time: Date, mutations: Mu
     // Older or equal sequence within the generation: keep the newer answer (no rollback).
     if (answer && answer.sessionGeneration === m.sessionGeneration && m.sequence <= answer.lastSequence) { receipts.push(current("stale")); continue; }
     const revision = (answer?.revision ?? 0) + 1;
-    await tx.answerMutation.create({ data: { attemptId: attempt.id, attemptQuestionId: m.attemptQuestionId, clientMutationId: m.clientMutationId, selectedOptionId: m.selectedOptionId, sessionGeneration: m.sessionGeneration, sequence: m.sequence, resultRevision: revision, payloadHash, acceptedAt: time } });
-    const next = { selectedOptionId: m.selectedOptionId, revision, acceptedAt: time, sessionGeneration: m.sessionGeneration, lastSequence: m.sequence };
+    await tx.answerMutation.create({ data: { attemptId: attempt.id, attemptQuestionId: m.attemptQuestionId, clientMutationId: m.clientMutationId, selectedOptionId: m.selectedOptionId, selectedOptionIds, sessionGeneration: m.sessionGeneration, sequence: m.sequence, resultRevision: revision, payloadHash, acceptedAt: time } });
+    const next = { selectedOptionId: m.selectedOptionId, selectedOptionIds, revision, acceptedAt: time, sessionGeneration: m.sessionGeneration, lastSequence: m.sequence };
     await tx.attemptAnswer.upsert({ where: { attemptQuestionId: m.attemptQuestionId }, create: { attemptQuestionId: m.attemptQuestionId, ...next }, update: next });
     byId.get(m.attemptQuestionId)!.answer = { attemptQuestionId: m.attemptQuestionId, ...next };
-    receipts.push({ clientMutationId: m.clientMutationId, status: "accepted", attemptQuestionId: m.attemptQuestionId, selectedOptionId: m.selectedOptionId, revision, acceptedAt: time.toISOString() });
+    receipts.push({ clientMutationId: m.clientMutationId, status: "accepted", attemptQuestionId: m.attemptQuestionId, selectedOptionId: m.selectedOptionId, selectedOptionIds, revision, acceptedAt: time.toISOString() });
   }
   return receipts;
 }
@@ -175,8 +190,8 @@ export async function submitAttempt(db: PrismaClient, userId: string, attemptId:
       result = { ...attempt, status: "SUBMITTED", submittedAt: time, submissionReceiptId: submissionId };
     }
     // A duplicate submission returns the stored receipt without rescoring.
-    const counts = await tx.attemptQuestion.findMany({ where: { attemptId }, select: { answer: { select: { selectedOptionId: true } } } });
-    return { ...state(result, time), receiptId: result.submissionReceiptId, submittedAt: result.submittedAt?.toISOString() ?? null, answered: counts.filter((q) => q.answer?.selectedOptionId).length, total: counts.length, receipts };
+    const counts = await tx.attemptQuestion.findMany({ where: { attemptId }, select: { answer: { select: { selectedOptionId: true, selectedOptionIds: true } } } });
+    return { ...state(result, time), receiptId: result.submissionReceiptId, submittedAt: result.submittedAt?.toISOString() ?? null, answered: counts.filter((q) => isAnswered(q.answer)).length, total: counts.length, receipts };
   }));
 }
 
@@ -215,8 +230,8 @@ export async function getAttemptView(db: PrismaClient, userId: string, attemptId
   const a = await db.attempt.findUniqueOrThrow({ where: { id: attemptId }, select: {
     rulesSnapshot: true, submittedAt: true, assignment: { select: { assessment: { select: { title: true } } } },
     questions: { orderBy: { setItem: { position: "asc" } }, select: {
-      id: true, markedForReview: true, answer: { select: { selectedOptionId: true, revision: true, sessionGeneration: true, lastSequence: true } },
-      setItem: { select: { position: true, questionVersion: { select: { kind: true, prompt: true, code: true, language: true, runtimeContext: true } } } },
+      id: true, markedForReview: true, answer: { select: { selectedOptionId: true, selectedOptionIds: true, revision: true, sessionGeneration: true, lastSequence: true } },
+      setItem: { select: { position: true, questionVersion: { select: { kind: true, answerMode: true, prompt: true, code: true, language: true, runtimeContext: true } } } },
       options: { orderBy: { displayPosition: "asc" }, select: { option: { select: { id: true, kind: true, content: true } } } },
     } },
   } });
