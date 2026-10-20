@@ -10,7 +10,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
 import { hash, token } from "../../src/server/auth/crypto";
 import { questionSchema, type QuestionInput } from "../../src/shared/questions";
-import { activateDraft, commitImport, createQuestion, discardDraft, getQuestion, listQuestions, retireQuestion, reviseQuestion, topicSupply, updateDraft } from "../../src/server/questions/service";
+import { activateDraft, activateDrafts, commitImport, createQuestion, discardDraft, draftsMatching, getQuestion, listQuestions, retireQuestion, reviseQuestion, topicSupply, updateDraft } from "../../src/server/questions/service";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL explicitly. Tests never default to the application database.");
@@ -129,4 +129,31 @@ test("listing shows one row per question with filters and active supply", async 
   assert.equal((await listQuestions(db, { q: "100%_literal" }, 1)).total, 0);
   const supply = await topicSupply(db);
   assert.equal(Number(supply.find((s) => s.topic === "Listing topic")?.theory), 1);
+});
+
+test("bulk activation activates matching drafts together, or nothing if any changed", async () => {
+  const topics = ["Bulk topic"];
+  const a = await createQuestion(db, sessionId, q({ prompt: "Bulk A", topics }));
+  const b = await createQuestion(db, sessionId, q({ prompt: "Bulk B", topics }));
+  const revised = await createQuestion(db, sessionId, q({ prompt: "Bulk revised", topics }));
+  await activateDraft(db, sessionId, revised.versionId, 1);
+  const v2 = await reviseQuestion(db, sessionId, revised.questionId);
+  await createQuestion(db, sessionId, q({ prompt: "Outside the filter", topics: ["Other bulk topic"] }));
+
+  const listed = await draftsMatching(db, { topic: "bulk TOPIC" });
+  assert.deepEqual(listed.map((d) => d.versionId).sort(), [a.versionId, b.versionId, v2.versionId].sort(), "only drafts matching the filter");
+  await assert.rejects(activateDrafts(db, studentSessionId, listed), (e) => code(e) === "FORBIDDEN");
+
+  // Someone edits draft B after the list was shown: the whole batch stops.
+  await updateDraft(db, sessionId, b.versionId, 1, q({ prompt: "Bulk B edited", topics }));
+  await assert.rejects(activateDrafts(db, sessionId, listed), (e) => code(e) === "STALE_LIST");
+  assert.equal(await db.questionVersion.count({ where: { id: { in: listed.map((d) => d.versionId) }, status: "ACTIVE" } }), 0, "nothing activated");
+
+  const fresh = await draftsMatching(db, { topic: "Bulk topic" });
+  assert.deepEqual(await activateDrafts(db, sessionId, fresh), { activated: 3 });
+  assert.equal(await db.questionVersion.count({ where: { id: { in: fresh.map((d) => d.versionId) }, status: "ACTIVE" } }), 3);
+  assert.deepEqual((await getQuestion(db, revised.questionId))!.versions.map((v) => [v.version, v.status]), [[2, "ACTIVE"], [1, "RETIRED"]], "a revision replaces its active version");
+  const audits = await db.auditLog.findMany({ where: { action: "QUESTION_ACTIVATED", targetId: { in: [a.questionId, b.questionId] } } });
+  assert.equal(audits.length, 2); assert.ok(audits.every((x) => (x.metadata as { bulk?: boolean }).bulk === true));
+  assert.equal((await draftsMatching(db, { topic: "Bulk topic" })).length, 0);
 });

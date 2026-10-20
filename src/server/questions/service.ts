@@ -79,6 +79,14 @@ export async function updateDraft(db: PrismaClient, sessionId: string, versionId
   });
 }
 
+/** Activates a locked draft and retires the previously active version of the same question. */
+async function activateLocked(tx: Tx, actorId: string, version: { id: string; questionId: string; version: number }, time: Date, reason: string, bulk: boolean) {
+  const previous = await tx.questionVersion.findMany({ where: { questionId: version.questionId, status: "ACTIVE" }, select: { id: true, version: true } });
+  for (const p of previous) await tx.questionVersion.update({ where: { id: p.id }, data: { status: "RETIRED", recordVersion: { increment: 1 } } });
+  await tx.questionVersion.update({ where: { id: version.id }, data: { status: "ACTIVE", activatedAt: time, recordVersion: { increment: 1 } } });
+  await tx.auditLog.create({ data: { actorId, action: "QUESTION_ACTIVATED", targetType: "Question", targetId: version.questionId, reason, metadata: { version: version.version, replaced: previous.map((p) => p.version), bulk } } });
+}
+
 /** Activation is the owner's review sign-off; it retires the previously active version. */
 export async function activateDraft(db: PrismaClient, sessionId: string, versionId: string, expectedVersion: number) {
   return db.$transaction(async (tx) => {
@@ -86,13 +94,43 @@ export async function activateDraft(db: PrismaClient, sessionId: string, version
     const { question, version } = await lockedVersion(tx, versionId);
     if (question.retiredAt) throw new AppError("RETIRED", "This question is retired and cannot be activated.", 409);
     expectDraft(version, expectedVersion);
-    const time = await now(tx);
-    const previous = await tx.questionVersion.findMany({ where: { questionId: version.questionId, status: "ACTIVE" }, select: { id: true, version: true } });
-    for (const p of previous) await tx.questionVersion.update({ where: { id: p.id }, data: { status: "RETIRED", recordVersion: { increment: 1 } } });
-    await tx.questionVersion.update({ where: { id: versionId }, data: { status: "ACTIVE", activatedAt: time, recordVersion: { increment: 1 } } });
-    await tx.auditLog.create({ data: { actorId: admin.userId, action: "QUESTION_ACTIVATED", targetType: "Question", targetId: version.questionId, reason: "Owner reviewed and activated the question.", metadata: { version: version.version, replaced: previous.map((p) => p.version) } } });
+    await activateLocked(tx, admin.userId, version, await now(tx), "Owner reviewed and activated the question.", false);
     return { questionId: version.questionId };
   });
+}
+
+export const MAX_BULK_ACTIVATION = 500;
+/**
+ * Activates many reviewed drafts at once, all or nothing. Each item carries the draft's
+ * recordVersion from the list the owner confirmed, so a draft edited since then stops the batch.
+ */
+export async function activateDrafts(db: PrismaClient, sessionId: string, items: { versionId: string; expectedVersion: number }[]) {
+  return db.$transaction(async (tx) => {
+    const admin = await assertAdmin(tx, sessionId);
+    const ids = [...new Set(items.map((i) => i.versionId))];
+    const found = await tx.questionVersion.findMany({ where: { id: { in: ids } }, select: { id: true, questionId: true } });
+    if (found.length !== ids.length) throw new AppError("STALE_LIST", "Some questions were changed or removed since the page loaded. Reload and try again.", 409);
+    // Lock each question in a stable order so concurrent edits cannot deadlock with this batch.
+    const questionIds = [...new Set(found.map((v) => v.questionId))].sort();
+    if (questionIds.length !== found.length) throw new AppError("STALE_LIST", "The list contains two drafts of the same question. Reload and try again.", 409);
+    await tx.$queryRaw`SELECT id FROM "Question" WHERE id = ANY(${questionIds}::uuid[]) ORDER BY id FOR NO KEY UPDATE`;
+    const versions = await tx.questionVersion.findMany({ where: { id: { in: ids } }, include: { question: { select: { retiredAt: true } } } });
+    const time = await now(tx);
+    for (const item of items) {
+      const version = versions.find((v) => v.id === item.versionId)!;
+      const label = `"${version.prompt.slice(0, 60)}${version.prompt.length > 60 ? "…" : ""}"`;
+      if (version.question.retiredAt) throw new AppError("RETIRED", `${label} belongs to a retired question. Reload and try again.`, 409);
+      if (version.status !== "DRAFT" || version.recordVersion !== item.expectedVersion) throw new AppError("STALE_LIST", `${label} was changed since the page loaded. Reload and try again.`, 409);
+      try {
+        await activateLocked(tx, admin.userId, version, time, "Owner bulk-activated drafts reviewed before upload.", true);
+      } catch (error) {
+        // The database refuses incomplete questions; name the one that stopped the batch.
+        if (error instanceof AppError) throw error;
+        throw new AppError("ACTIVATION_FAILED", `${label} could not be activated. Open it and check its options and correct answers.`, 422);
+      }
+    }
+    return { activated: items.length };
+  }, { timeout: 60_000 });
 }
 
 /** Starts a new draft version from the latest one; returns the existing draft if there is one. */
@@ -185,8 +223,7 @@ export type QuestionFilters = { q?: string; status?: (typeof STATUSES)[number]; 
 export type QuestionRow = { questionId: string; versionId: string; version: number; status: (typeof STATUSES)[number]; kind: (typeof KINDS)[number]; difficulty: (typeof DIFFICULTIES)[number]; prompt: string; objective: string; updatedAt: Date; activeVersion: number | null; retiredAt: Date | null; topics: string[]; total: bigint };
 export const PAGE_SIZE = 25;
 
-/** One row per question: its latest version, plus the active version number if a newer draft exists. */
-export async function listQuestions(db: PrismaClient, filters: QuestionFilters, page: number) {
+function filterSql(filters: QuestionFilters): Prisma.Sql[] {
   const where: Prisma.Sql[] = [];
   if (filters.q) { const like = `%${filters.q.replace(/[\\%_]/g, "\\$&")}%`; where.push(Prisma.sql`(l.prompt ILIKE ${like} OR l.objective ILIKE ${like} OR l.code ILIKE ${like})`); }
   if (filters.status === "ACTIVE") where.push(Prisma.sql`a.version IS NOT NULL`);
@@ -195,6 +232,25 @@ export async function listQuestions(db: PrismaClient, filters: QuestionFilters, 
   if (filters.kind) where.push(Prisma.sql`l.kind = ${filters.kind}::"QuestionKind"`);
   if (filters.difficulty) where.push(Prisma.sql`l.difficulty = ${filters.difficulty}::"Difficulty"`);
   if (filters.topic) where.push(Prisma.sql`EXISTS (SELECT 1 FROM "QuestionTopic" qt JOIN "Topic" t ON t.id = qt."topicId" WHERE qt."questionVersionId" = l.id AND lower(t.name) = lower(${filters.topic}))`);
+  return where;
+}
+
+/** Every draft (latest version) matching the filters, across all pages, for bulk activation. */
+export async function draftsMatching(db: PrismaClient, filters: QuestionFilters) {
+  const where = [...filterSql(filters), Prisma.sql`l.status = 'DRAFT'`, Prisma.sql`q."retiredAt" IS NULL`];
+  return db.$queryRaw<{ versionId: string; expectedVersion: number }[]>`
+    WITH latest AS (SELECT DISTINCT ON ("questionId") * FROM "QuestionVersion" ORDER BY "questionId", version DESC)
+    SELECT l.id AS "versionId", l."recordVersion" AS "expectedVersion"
+    FROM latest l JOIN "Question" q ON q.id = l."questionId"
+    LEFT JOIN "QuestionVersion" a ON a."questionId" = l."questionId" AND a.status = 'ACTIVE'
+    WHERE ${Prisma.join(where, " AND ")}
+    ORDER BY l."updatedAt" DESC, l.id
+    LIMIT ${MAX_BULK_ACTIVATION + 1}`;
+}
+
+/** One row per question: its latest version, plus the active version number if a newer draft exists. */
+export async function listQuestions(db: PrismaClient, filters: QuestionFilters, page: number) {
+  const where = filterSql(filters);
   const rows = await db.$queryRaw<QuestionRow[]>`
     WITH latest AS (SELECT DISTINCT ON ("questionId") * FROM "QuestionVersion" ORDER BY "questionId", version DESC)
     SELECT l."questionId", l.id AS "versionId", l.version, l.status::text AS status, l.kind::text AS kind, l.difficulty::text AS difficulty,
