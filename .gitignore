@@ -77,6 +77,9 @@ web_modules/
 # Next.js build output
 .next
 out
+next-env.d.ts
+src/generated/prisma/
+.local-db/
 
 # Nuxt.js build / generate output
 .nuxt
