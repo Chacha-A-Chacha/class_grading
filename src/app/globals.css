@@ -127,6 +127,30 @@
   html {
     @apply font-sans;
     }
+  /* Native control chrome: hide number spinners (values are typed; the arrows are tiny,
+     unthemed and easy to nudge by accident while scrolling). */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  /* Keep the date-time picker button (it is useful) but match the theme. */
+  input[type="datetime-local"],
+  input[type="date"],
+  input[type="time"] {
+    color-scheme: light;
+  }
+  input::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+  }
+  input::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
   /* Keep browser-autofilled fields in the theme instead of the browser's blue/yellow fill. */
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
