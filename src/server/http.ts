@@ -26,7 +26,11 @@ export function endpoint<Context = unknown>(action: (request: Request, context: 
         response.headers.set("Retry-After", "1");
         return response;
       }
-      console.error("Request failed", requestId); // Never log tokens, workbook rows or OTPs.
+      // Production logs only the error type and code: messages can contain tokens, workbook
+      // rows, OTPs or question content. Development logs the full error for diagnosis.
+      const failure = databaseError(error);
+      if (process.env.NODE_ENV === "production") console.error("Request failed", requestId, error instanceof Error ? error.name : typeof error, failure?.code ?? "");
+      else console.error("Request failed", requestId, error);
       return json({ code: "UNAVAILABLE", message: "This operation is unavailable. Check the server configuration and try again.", requestId }, 503);
     }
   };
