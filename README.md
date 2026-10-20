@@ -14,7 +14,8 @@ npm ci
 npm run dev
 ```
 
-Open <http://127.0.0.1:3000>. Development and local production servers bind to
+Open <http://127.0.0.1:3000>. After a migration or `npm run db:generate`, restart
+`npm run dev`: a running dev server keeps the previous database client in memory. Development and local production servers bind to
 loopback. The placeholder home page needs no database connection. Database
 commands use `DATABASE_URL` from an ignored `.env` file; copy `.env.example`
 and configure your local connection when setting up a new checkout.

@@ -19,6 +19,7 @@ Examples: "Cut form submissions to one per address every four hours", "Stop send
 # Project rules
 
 - Requirements: `SPECIFICATION.md`. Admin screens: `docs/admin-workflow.md`. Question import format: `docs/question-import.md`. Schema rationale: `docs/database-design.md`. Hot-path and deployment rules: `docs/performance.md`. Open security items: `docs/security-baseline.md`.
+- After a migration or `prisma generate`, restart `npm run dev`; the running server keeps the old database client.
 - Schema changes go through new Prisma migrations. Never edit an applied migration or use `db push`; triggers, CHECKs and partial indexes live in migration SQL.
 - The expiry worker is a separate process: `npm run worker`. Exam writes must lock the attempt and read `clock_timestamp()` after the lock (see `docs/performance.md`).
 - Database tests need `TEST_DATABASE_URL` pointing at a separate database (locally `class_grading_test`), never the app database.
