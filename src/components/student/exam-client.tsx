@@ -156,51 +156,78 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     </CardContent></Card>;
   }
 
-  const unanswered = initial.questions.length - answered;
+  const total = initial.questions.length;
+  const unanswered = total - answered;
   const saveState = saves[question.id];
-  return <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">{initial.title}</h1><span className="text-sm text-muted-foreground">Question {index + 1} of {initial.questions.length}</span></div>
-      <Card><CardHeader><div className="flex flex-wrap items-center gap-2"><CardTitle><h2>Question {index + 1}</h2></CardTitle>{marked[question.id] && <Badge variant="outline"><Flag aria-hidden="true" />Marked for review</Badge>}</div></CardHeader><CardContent className="space-y-5">
-        <p className="whitespace-pre-wrap leading-relaxed">{question.prompt}</p>
-        {question.code && <div className="space-y-2">{question.runtimeContext && <p className="text-sm text-muted-foreground">Context: {question.runtimeContext}</p>}<CodeBlock code={question.code} language={question.language} /></div>}
-        {question.answerMode === "MULTIPLE" && <p className="text-sm font-medium">Select all that apply. You earn the point only if you choose exactly the correct options.</p>}
-        {(() => {
-          const chosen = selected[question.id];
-          const rows = question.options.map((o, i) => <div key={o.id} className={cn("flex items-start gap-3 rounded-lg border p-3", chosen.includes(o.id) && "border-primary bg-accent/40")}>
-            {question.answerMode === "MULTIPLE"
-              ? <Checkbox id={`option-${o.id}`} className="mt-1" checked={chosen.includes(o.id)} disabled={submitting} onCheckedChange={(c) => choose(question.id, c === true ? [...chosen, o.id] : chosen.filter((x) => x !== o.id))} />
-              : <RadioGroupItem value={o.id} id={`option-${o.id}`} className="mt-1" />}
-            <Label htmlFor={`option-${o.id}`} className="flex min-w-0 flex-1 flex-col items-start gap-2 font-normal"><span className="font-medium">{LETTERS[i]}</span>{o.kind === "CODE" ? <CodeBlock code={o.content} /> : <span className="whitespace-pre-wrap">{o.content}</span>}</Label>
-          </div>);
-          return question.answerMode === "MULTIPLE"
-            ? <div role="group" aria-label={`Answers for question ${index + 1}`} className="grid gap-3">{rows}</div>
-            : <RadioGroup aria-label={`Answer for question ${index + 1}`} value={chosen[0] ?? ""} onValueChange={(v) => choose(question.id, [v])} className="gap-3" disabled={submitting}>{rows}</RadioGroup>;
-        })()}
-        <p aria-live="polite" className={cn("text-sm", saveState === "failed" ? "text-destructive" : "text-muted-foreground")}>{saveState ? SAVE_TEXT[saveState] : selected[question.id].length ? SAVE_TEXT.saved : "Not answered"}</p>
-        <div className="flex flex-wrap gap-3">
-          <Button variant="outline" disabled={index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft aria-hidden="true" />Previous</Button>
-          <Button variant="outline" disabled={index === initial.questions.length - 1} onClick={() => setIndex(index + 1)}>Next<ChevronRight aria-hidden="true" /></Button>
-          <Button variant="ghost" onClick={() => void toggleReview(question.id)}><Flag aria-hidden="true" />{marked[question.id] ? "Unmark review" : "Mark for review"}</Button>
-          {selected[question.id].length > 0 && <Button variant="ghost" disabled={submitting} onClick={() => choose(question.id, [])}>Clear answer</Button>}
-        </div>
-      </CardContent></Card>
-      {notice && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
-    </div>
+  const multipleChoice = question.answerMode === "MULTIPLE";
+  const chosen = selected[question.id];
+  // Unselected controls need a visible boundary (WCAG 1.4.11 non-text contrast).
+  const control = "mt-0.5 border-foreground/50";
+  const timer = (className: string) => <p role="timer" aria-label="Time remaining" className={cn("font-mono font-semibold tabular-nums", remaining < 5 * 60_000 && "text-destructive", className)}>{clock(remaining)}</p>;
+  const connection = online
+    ? <><Wifi aria-hidden="true" className="size-4" /><span>Connected</span></>
+    : <><WifiOff aria-hidden="true" className="size-4 text-destructive" /><span>Connection problem. Answers will be retried.</span></>;
 
-    <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start" aria-label="Exam progress">
-      <Card><CardContent className="space-y-3 pt-6">
-        <div><p className="text-sm text-muted-foreground">Time remaining</p><p role="timer" className={cn("font-mono text-3xl font-semibold tabular-nums", remaining < 5 * 60_000 && "text-destructive")}>{clock(remaining)}</p>
-          <p className="sr-only" aria-live="assertive">{remaining > 0 && remaining < 60_000 ? "Less than one minute remaining." : remaining > 0 && remaining < 5 * 60_000 ? "Less than five minutes remaining." : ""}</p></div>
-        <p className="flex items-center gap-2 text-sm" aria-live="polite">{online ? <><Wifi aria-hidden="true" className="size-4" />Connected</> : <><WifiOff aria-hidden="true" className="size-4 text-destructive" />Connection problem. Answers will be retried.</>}</p>
-        <p className="text-sm">{answered} of {initial.questions.length} answered</p>
-      </CardContent></Card>
-      <Card><CardHeader><CardTitle><h2 className="text-base">Questions</h2></CardTitle></CardHeader><CardContent>
-        <nav aria-label="Question navigator" className="grid grid-cols-5 gap-2">{initial.questions.map((q, i) => <Button key={q.id} size="sm" variant={i === index ? "default" : selected[q.id].length ? "secondary" : "outline"} aria-current={i === index ? "step" : undefined} aria-label={`Question ${i + 1}${selected[q.id].length ? ", answered" : ""}${marked[q.id] ? ", marked for review" : ""}${saves[q.id] === "failed" ? ", not saved" : ""}`} className="relative" onClick={() => setIndex(i)}>{i + 1}{marked[q.id] && <Flag aria-hidden="true" className="absolute -top-1 -right-1 size-3" />}</Button>)}</nav>
-      </CardContent></Card>
-      {!confirming
-        ? <Button className="w-full" disabled={submitting} onClick={() => setConfirming(true)}>Review and submit</Button>
-        : <Alert><AlertTitle>Submit your answers?</AlertTitle><AlertDescription className="space-y-3"><p>{unanswered ? `${unanswered} question${unanswered === 1 ? " is" : "s are"} unanswered.` : "Every question is answered."}{pending.current.size ? ` ${pending.current.size} answer${pending.current.size === 1 ? " is" : "s are"} still being saved and will be sent with your submission.` : ""} You cannot change answers after submitting.</p><div className="flex flex-wrap gap-2"><Button disabled={submitting} onClick={() => void submit()}>{submitting ? "Submitting…" : "Submit now"}</Button><Button variant="outline" disabled={submitting} onClick={() => setConfirming(false)}>Keep working</Button></div></AlertDescription></Alert>}
-    </aside>
+  // One compact row per option; the whole row is the click target.
+  const rows = question.options.map((o, i) => {
+    const on = chosen.includes(o.id);
+    return <Label key={o.id} htmlFor={`option-${o.id}`} className={cn("flex w-full cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal leading-relaxed transition-colors hover:bg-muted/60", on && "border-primary bg-accent/40 hover:bg-accent/40")}>
+      {multipleChoice
+        ? <Checkbox id={`option-${o.id}`} className={control} checked={on} disabled={submitting} onCheckedChange={(c) => choose(question.id, c === true ? [...chosen, o.id] : chosen.filter((x) => x !== o.id))} />
+        : <RadioGroupItem value={o.id} id={`option-${o.id}`} className={control} />}
+      <span className="w-4 shrink-0 font-semibold">{LETTERS[i]}</span>
+      <span className="min-w-0 flex-1">{o.kind === "CODE" ? <code className="block overflow-x-auto font-mono text-sm whitespace-pre">{o.content}</code> : <span className="whitespace-pre-wrap">{o.content}</span>}</span>
+    </Label>;
+  });
+
+  return <div className="space-y-4">
+    {/* Phones and tablets: the sidebar sits below the question, so keep time and progress in view. */}
+    <div className="sticky top-0 z-20 -mx-6 flex items-center justify-between gap-4 border-b bg-background/95 px-6 py-2 backdrop-blur lg:hidden">
+      {timer("text-2xl")}
+      <span className="text-sm">{answered}/{total} answered</span>
+      <span className="flex items-center gap-1 text-sm" aria-live="polite">{online ? <Wifi aria-label="Connected" className="size-4" /> : <><WifiOff aria-hidden="true" className="size-4 text-destructive" /><span className="text-destructive">Offline</span></>}</span>
+    </div>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="min-w-0 space-y-4">
+        <h1 className="text-xl font-semibold">{initial.title}</h1>
+        <Card><CardHeader><div className="flex flex-wrap items-center gap-2"><CardTitle><h2>Question {index + 1} of {total}</h2></CardTitle>{multipleChoice && <Badge variant="secondary">Select all that apply</Badge>}{marked[question.id] && <Badge variant="outline"><Flag aria-hidden="true" />Marked for review</Badge>}</div></CardHeader><CardContent className="space-y-5">
+          <p className="whitespace-pre-wrap leading-relaxed">{question.prompt}</p>
+          {question.code && <div className="space-y-2">{question.runtimeContext && <p className="text-sm text-muted-foreground">Context: {question.runtimeContext}</p>}<CodeBlock code={question.code} language={question.language} /></div>}
+          {multipleChoice && <p className="text-sm text-muted-foreground">Choose every correct option. The point is awarded only for exactly the correct set.</p>}
+          {multipleChoice
+            ? <div role="group" aria-label={`Answers for question ${index + 1}`} className="grid gap-2">{rows}</div>
+            : <RadioGroup aria-label={`Answer for question ${index + 1}`} value={chosen[0] ?? ""} onValueChange={(v) => choose(question.id, [v])} className="gap-2" disabled={submitting}>{rows}</RadioGroup>}
+          <p aria-live="polite" className={cn("text-sm", saveState === "failed" ? "text-destructive" : "text-muted-foreground")}>{saveState ? SAVE_TEXT[saveState] : chosen.length ? SAVE_TEXT.saved : "Not answered"}</p>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" disabled={index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft aria-hidden="true" />Previous</Button>
+            <Button variant="outline" disabled={index === total - 1} onClick={() => setIndex(index + 1)}>Next<ChevronRight aria-hidden="true" /></Button>
+            <Button variant="ghost" onClick={() => void toggleReview(question.id)}><Flag aria-hidden="true" />{marked[question.id] ? "Unmark review" : "Mark for review"}</Button>
+            {chosen.length > 0 && <Button variant="ghost" disabled={submitting} onClick={() => choose(question.id, [])}>Clear answer</Button>}
+          </div>
+        </CardContent></Card>
+        {notice && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
+      </div>
+
+      <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start" aria-label="Exam progress">
+        <Card className="hidden lg:block"><CardContent className="space-y-3 pt-6">
+          <div><p className="text-sm text-muted-foreground">Time remaining</p>{timer("text-3xl")}</div>
+          <p className="flex items-center gap-2 text-sm" aria-live="polite">{connection}</p>
+          <p className="text-sm">{answered} of {total} answered</p>
+        </CardContent></Card>
+        <p className="sr-only" aria-live="assertive">{remaining > 0 && remaining < 60_000 ? "Less than one minute remaining." : remaining > 0 && remaining < 5 * 60_000 ? "Less than five minutes remaining." : ""}</p>
+        <Card><CardHeader><CardTitle><h2 className="text-base">Questions</h2></CardTitle></CardHeader><CardContent className="space-y-4">
+          <nav aria-label="Question navigator" className="grid grid-cols-5 gap-2">{initial.questions.map((q, i) => <Button key={q.id} size="sm" variant={i === index ? "default" : selected[q.id].length ? "secondary" : "outline"} aria-current={i === index ? "step" : undefined} aria-label={`Question ${i + 1}${selected[q.id].length ? ", answered" : ""}${marked[q.id] ? ", marked for review" : ""}${saves[q.id] === "failed" ? ", not saved" : ""}`} className={cn("gap-0.5 px-0", selected[q.id].length > 0 && i !== index && "font-semibold")} onClick={() => setIndex(i)}>{i + 1}{marked[q.id] && <Flag aria-hidden="true" className="size-3" />}</Button>)}</nav>
+          <ul className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-muted-foreground" aria-label="Navigator key">
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="size-3 rounded-sm bg-primary" />Current</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="size-3 rounded-sm bg-secondary ring-1 ring-border" />Answered</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="size-3 rounded-sm border" />Not answered</li>
+            <li className="flex items-center gap-1.5"><Flag aria-hidden="true" className="size-3" />For review</li>
+          </ul>
+        </CardContent></Card>
+        {!confirming
+          ? <Button className="w-full" disabled={submitting} onClick={() => setConfirming(true)}>Review and submit</Button>
+          : <Alert><AlertTitle>Submit your answers?</AlertTitle><AlertDescription className="space-y-3"><p>{unanswered ? `${unanswered} question${unanswered === 1 ? " is" : "s are"} unanswered.` : "Every question is answered."}{pending.current.size ? ` ${pending.current.size} answer${pending.current.size === 1 ? " is" : "s are"} still being saved and will be sent with your submission.` : ""} You cannot change answers after submitting.</p><div className="flex flex-wrap gap-2"><Button disabled={submitting} onClick={() => void submit()}>{submitting ? "Submitting…" : "Submit now"}</Button><Button variant="outline" disabled={submitting} onClick={() => setConfirming(false)}>Keep working</Button></div></AlertDescription></Alert>}
+      </aside>
+    </div>
   </div>;
 }
