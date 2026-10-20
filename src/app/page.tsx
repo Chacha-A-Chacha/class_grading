@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronDown, ClipboardCheck, Clock, Laptop, ListChecks, LogIn, Mail, MonitorCheck, Save, Shuffle, Wifi } from "lucide-react";
 import { BRAND } from "@/shared/brand";
@@ -31,6 +32,14 @@ const faqs = [
   { q: "When will I see my results?", a: "After every student's answering window has closed and your instructor releases results. You will then see your score, with explanations where your instructor shares them." },
   { q: "Who can sign in?", a: "Only students your instructor has enrolled, and instructors. If a code does not arrive, check your spam folder or ask your instructor to confirm your registered email." },
 ];
+
+// The only page search engines may index; it shares the root Open Graph card.
+export const metadata: Metadata = {
+  title: { absolute: BRAND.shareTitle },
+  description: BRAND.shareDescription,
+  alternates: { canonical: "/" },
+  robots: { index: true, follow: true },
+};
 
 export default function HomePage() {
   return <div className="min-h-svh">

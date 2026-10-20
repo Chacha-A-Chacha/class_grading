@@ -156,6 +156,16 @@ See [database design and relationships](docs/database-design.md).
 See [the dated security review](docs/security-baseline.md) for advisories,
 the October 14 security-update follow-up, and upgrade instructions.
 
+## Sharing and search
+
+The landing page is the only indexable page. It carries Open Graph and X card tags, a
+1200×630 preview image (`src/app/opengraph-image.tsx`) and the `{ }` app icon; copy lives in
+`src/shared/brand.ts`. Everything else sends `noindex` and is disallowed in `robots.txt`.
+Previews need the app on a public HTTPS domain with `APP_URL` set to it: canonical links,
+`og:image`, `robots.txt` and the sitemap are all built from `APP_URL`. After deploying,
+check the card with Facebook's Sharing Debugger before the first public share, because
+WhatsApp and social networks cache previews.
+
 ## UI components and theme
 
 The [selected preset](https://ui.shadcn.com/create?preset=b3kJVrgzg) is configured

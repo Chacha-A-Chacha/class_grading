@@ -14,7 +14,8 @@ const nextConfig: NextConfig = {
     return [
       ...["/api/:path*", "/admin/:path*", "/student/:path*", "/sign-in/:path*"].map((source) => ({
         source,
-        headers: [{ key: "Cache-Control", value: "private, no-store" }],
+        // Belt and braces with robots.txt: private areas are never indexed, even if linked.
+        headers: [{ key: "Cache-Control", value: "private, no-store" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }],
       })),
       {
         source: "/:path*",
