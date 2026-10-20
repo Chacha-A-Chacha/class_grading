@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
@@ -29,8 +30,10 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   // Server-calibrated countdown: the display never authorises a write (A02).
   const offset = useRef(Date.parse(initial.serverNow) - Date.now());
   const [tick, setTick] = useState(() => Date.now());
-  const [index, setIndex] = useState(() => Math.max(0, initial.questions.findIndex((q) => !q.answer?.selectedOptionId)));
-  const [selected, setSelected] = useState<Record<string, string | null>>(() => Object.fromEntries(initial.questions.map((q) => [q.id, q.answer?.selectedOptionId ?? null])));
+  const [index, setIndex] = useState(() => Math.max(0, initial.questions.findIndex((q) => !q.answer?.selectedOptionId && !q.answer?.selectedOptionIds.length)));
+  // Every answer is a list of option IDs: at most one for single-answer questions.
+  const [selected, setSelected] = useState<Record<string, string[]>>(() => Object.fromEntries(initial.questions.map((q) => [q.id, q.answer ? (q.answer.selectedOptionId ? [q.answer.selectedOptionId] : q.answer.selectedOptionIds) : []])));
+  const multipleIds = useRef(new Set(initial.questions.filter((q) => q.answerMode === "MULTIPLE").map((q) => q.id)));
   const [marked, setMarked] = useState<Record<string, boolean>>(() => Object.fromEntries(initial.questions.map((q) => [q.id, q.markedForReview])));
   const [saves, setSaves] = useState<Record<string, SaveState>>({});
   const [online, setOnline] = useState(true);
@@ -44,7 +47,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   const active = status === "ACTIVE";
   const remaining = expiresAt - (tick + offset.current);
   const question = initial.questions[index];
-  const answered = initial.questions.filter((q) => selected[q.id]).length;
+  const answered = initial.questions.filter((q) => selected[q.id].length).length;
 
   const sync = useCallback((s: Partial<AttemptState>) => {
     if (s.serverNow) offset.current = Date.parse(s.serverNow) - Date.now();
@@ -67,7 +70,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
         if (pending.current.get(r.attemptQuestionId)?.clientMutationId !== r.clientMutationId) continue; // a newer change is queued
         pending.current.delete(r.attemptQuestionId);
         mark([r.attemptQuestionId], "saved");
-        if (r.status === "stale") setSelected((prev) => ({ ...prev, [r.attemptQuestionId]: r.selectedOptionId }));
+        if (r.status === "stale") setSelected((prev) => ({ ...prev, [r.attemptQuestionId]: r.selectedOptionId ? [r.selectedOptionId] : r.selectedOptionIds }));
       }
       if (result.closed) { setNotice("Time is up. Changes after the deadline were not saved."); pending.current.clear(); }
       failures.current = 0; setOnline(true);
@@ -82,12 +85,14 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     }
   }, [id, sync]);
 
-  function choose(questionId: string, optionId: string | null) {
+  function choose(questionId: string, optionIds: string[]) {
     if (!active || submitting) return;
-    setSelected((prev) => ({ ...prev, [questionId]: optionId }));
+    const multiple = multipleIds.current.has(questionId);
+    const ids = multiple ? [...new Set(optionIds)].sort() : optionIds.slice(0, 1);
+    setSelected((prev) => ({ ...prev, [questionId]: ids }));
     const sequence = (sequences.current.get(questionId) ?? 0) + 1;
     sequences.current.set(questionId, sequence);
-    pending.current.set(questionId, { attemptQuestionId: questionId, selectedOptionId: optionId, clientMutationId: crypto.randomUUID(), sessionGeneration: generation, sequence });
+    pending.current.set(questionId, { attemptQuestionId: questionId, selectedOptionId: multiple ? null : ids[0] ?? null, ...(multiple ? { selectedOptionIds: ids } : {}), clientMutationId: crypto.randomUUID(), sessionGeneration: generation, sequence });
     mark([questionId], "saving");
     void flush();
   }
@@ -159,18 +164,25 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
       <Card><CardHeader><div className="flex flex-wrap items-center gap-2"><CardTitle><h2>Question {index + 1}</h2></CardTitle>{marked[question.id] && <Badge variant="outline"><Flag aria-hidden="true" />Marked for review</Badge>}</div></CardHeader><CardContent className="space-y-5">
         <p className="whitespace-pre-wrap leading-relaxed">{question.prompt}</p>
         {question.code && <div className="space-y-2">{question.runtimeContext && <p className="text-sm text-muted-foreground">Context: {question.runtimeContext}</p>}<CodeBlock code={question.code} language={question.language} /></div>}
-        <RadioGroup aria-label={`Answer for question ${index + 1}`} value={selected[question.id] ?? ""} onValueChange={(v) => choose(question.id, v)} className="gap-3" disabled={submitting}>
-          {question.options.map((o, i) => <div key={o.id} className={cn("flex items-start gap-3 rounded-lg border p-3", selected[question.id] === o.id && "border-primary bg-accent/40")}>
-            <RadioGroupItem value={o.id} id={`option-${o.id}`} className="mt-1" />
+        {question.answerMode === "MULTIPLE" && <p className="text-sm font-medium">Select all that apply. You earn the point only if you choose exactly the correct options.</p>}
+        {(() => {
+          const chosen = selected[question.id];
+          const rows = question.options.map((o, i) => <div key={o.id} className={cn("flex items-start gap-3 rounded-lg border p-3", chosen.includes(o.id) && "border-primary bg-accent/40")}>
+            {question.answerMode === "MULTIPLE"
+              ? <Checkbox id={`option-${o.id}`} className="mt-1" checked={chosen.includes(o.id)} disabled={submitting} onCheckedChange={(c) => choose(question.id, c === true ? [...chosen, o.id] : chosen.filter((x) => x !== o.id))} />
+              : <RadioGroupItem value={o.id} id={`option-${o.id}`} className="mt-1" />}
             <Label htmlFor={`option-${o.id}`} className="flex min-w-0 flex-1 flex-col items-start gap-2 font-normal"><span className="font-medium">{LETTERS[i]}</span>{o.kind === "CODE" ? <CodeBlock code={o.content} /> : <span className="whitespace-pre-wrap">{o.content}</span>}</Label>
-          </div>)}
-        </RadioGroup>
-        <p aria-live="polite" className={cn("text-sm", saveState === "failed" ? "text-destructive" : "text-muted-foreground")}>{saveState ? SAVE_TEXT[saveState] : selected[question.id] ? SAVE_TEXT.saved : "Not answered"}</p>
+          </div>);
+          return question.answerMode === "MULTIPLE"
+            ? <div role="group" aria-label={`Answers for question ${index + 1}`} className="grid gap-3">{rows}</div>
+            : <RadioGroup aria-label={`Answer for question ${index + 1}`} value={chosen[0] ?? ""} onValueChange={(v) => choose(question.id, [v])} className="gap-3" disabled={submitting}>{rows}</RadioGroup>;
+        })()}
+        <p aria-live="polite" className={cn("text-sm", saveState === "failed" ? "text-destructive" : "text-muted-foreground")}>{saveState ? SAVE_TEXT[saveState] : selected[question.id].length ? SAVE_TEXT.saved : "Not answered"}</p>
         <div className="flex flex-wrap gap-3">
           <Button variant="outline" disabled={index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft aria-hidden="true" />Previous</Button>
           <Button variant="outline" disabled={index === initial.questions.length - 1} onClick={() => setIndex(index + 1)}>Next<ChevronRight aria-hidden="true" /></Button>
           <Button variant="ghost" onClick={() => void toggleReview(question.id)}><Flag aria-hidden="true" />{marked[question.id] ? "Unmark review" : "Mark for review"}</Button>
-          {selected[question.id] && <Button variant="ghost" disabled={submitting} onClick={() => choose(question.id, null)}>Clear answer</Button>}
+          {selected[question.id].length > 0 && <Button variant="ghost" disabled={submitting} onClick={() => choose(question.id, [])}>Clear answer</Button>}
         </div>
       </CardContent></Card>
       {notice && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
@@ -184,7 +196,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
         <p className="text-sm">{answered} of {initial.questions.length} answered</p>
       </CardContent></Card>
       <Card><CardHeader><CardTitle><h2 className="text-base">Questions</h2></CardTitle></CardHeader><CardContent>
-        <nav aria-label="Question navigator" className="grid grid-cols-5 gap-2">{initial.questions.map((q, i) => <Button key={q.id} size="sm" variant={i === index ? "default" : selected[q.id] ? "secondary" : "outline"} aria-current={i === index ? "step" : undefined} aria-label={`Question ${i + 1}${selected[q.id] ? ", answered" : ""}${marked[q.id] ? ", marked for review" : ""}${saves[q.id] === "failed" ? ", not saved" : ""}`} className="relative" onClick={() => setIndex(i)}>{i + 1}{marked[q.id] && <Flag aria-hidden="true" className="absolute -top-1 -right-1 size-3" />}</Button>)}</nav>
+        <nav aria-label="Question navigator" className="grid grid-cols-5 gap-2">{initial.questions.map((q, i) => <Button key={q.id} size="sm" variant={i === index ? "default" : selected[q.id].length ? "secondary" : "outline"} aria-current={i === index ? "step" : undefined} aria-label={`Question ${i + 1}${selected[q.id].length ? ", answered" : ""}${marked[q.id] ? ", marked for review" : ""}${saves[q.id] === "failed" ? ", not saved" : ""}`} className="relative" onClick={() => setIndex(i)}>{i + 1}{marked[q.id] && <Flag aria-hidden="true" className="absolute -top-1 -right-1 size-3" />}</Button>)}</nav>
       </CardContent></Card>
       {!confirming
         ? <Button className="w-full" disabled={submitting} onClick={() => setConfirming(true)}>Review and submit</Button>

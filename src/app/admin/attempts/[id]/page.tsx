@@ -4,6 +4,7 @@ import { z } from "zod";
 import { adminPage } from "@/server/auth/http";
 import { getDatabase } from "@/server/db";
 import { attemptDetail } from "@/server/attempts/admin";
+import { isCorrect } from "@/server/attempts/service";
 import { nairobiFormat } from "@/shared/assessments";
 import { AttemptActions } from "@/components/admin/attempt-actions";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +24,7 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
   const score = a.scores[0];
   const letter = (q: (typeof a.questions)[number], optionId: string | null | undefined) => optionId ? LETTERS[q.options.findIndex((o) => o.option.id === optionId)] ?? "?" : null;
   const timeline = [
-    ...a.questions.flatMap((q) => q.mutations.map((m) => ({ at: m.acceptedAt, key: m.id, text: `Question ${q.setItem.position}: ${m.selectedOptionId ? `chose ${letter(q, m.selectedOptionId)}` : "cleared the answer"} (revision ${m.resultRevision})`, source: "Answer accepted by the server" }))),
+    ...a.questions.flatMap((q) => q.mutations.map((m) => ({ at: m.acceptedAt, key: m.id, text: `Question ${q.setItem.position}: ${m.selectedOptionId ? `chose ${letter(q, m.selectedOptionId)}` : m.selectedOptionIds.length ? `chose ${m.selectedOptionIds.map((id) => letter(q, id)).sort().join(", ")}` : "cleared the answer"} (revision ${m.resultRevision})`, source: "Answer accepted by the server" }))),
     ...a.audits.map((x) => ({ at: x.createdAt, key: x.id, text: `${x.action.replaceAll("_", " ").toLowerCase()}: ${x.reason}`, source: "Owner action" })),
     { at: a.startedAt, key: "start", text: `Started on set ${a.set.label}; deadline ${seconds.format(a.expiresAt)}`, source: "Server" },
     ...(a.terminalAt ? [{ at: a.terminalAt, key: "end", text: STATUS[a.status], source: "Server" }] : []),
@@ -44,11 +45,11 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
     <AttemptActions attemptId={a.id} recordVersion={a.recordVersion} status={a.status} released={!!assignment.assessment.releasedAt} retest={canRetest ? { assignmentId: assignment.id, recordVersion: assignment.recordVersion, durationMinutes: Math.round(assignment.durationSeconds / 60) } : null} />
     <Card><CardHeader><CardTitle><h2>Answers</h2></CardTitle></CardHeader><CardContent>
       <Table><TableCaption>Letters follow the order this student saw. Only server-accepted answers are shown.</TableCaption><TableHeader><TableRow><TableHead>#</TableHead><TableHead>Question</TableHead><TableHead>Chosen</TableHead><TableHead>Correct</TableHead><TableHead>Result</TableHead></TableRow></TableHeader><TableBody>
-        {a.questions.map((q) => { const chosen = q.answer?.selectedOptionId; const correct = q.setItem.questionVersion.answerKey?.correctOptionId; return <TableRow key={q.id}>
+        {a.questions.map((q) => { const v = q.setItem.questionVersion; const keys = v.answerKeys.map((k) => k.correctOptionId); const chosen = q.answer ? (q.answer.selectedOptionId ? [q.answer.selectedOptionId] : q.answer.selectedOptionIds) : []; const letters = (ids: string[]) => ids.map((id) => letter(q, id)).sort().join(", "); return <TableRow key={q.id}>
           <TableCell>{q.setItem.position}</TableCell>
-          <TableCell className="max-w-md"><Link className="line-clamp-2 whitespace-normal text-primary hover:underline" href={`/admin/questions/${q.setItem.questionVersion.questionId}`}>{q.setItem.questionVersion.prompt}</Link><span className="text-sm text-muted-foreground">v{q.setItem.questionVersion.version}{q.markedForReview && " · marked for review"}</span></TableCell>
-          <TableCell>{letter(q, chosen) ?? "—"}</TableCell><TableCell>{letter(q, correct)}</TableCell>
-          <TableCell>{!chosen ? <Badge variant="outline">Unanswered</Badge> : chosen === correct ? <Badge>Correct</Badge> : <Badge variant="secondary">Incorrect</Badge>}</TableCell>
+          <TableCell className="max-w-md"><Link className="line-clamp-2 whitespace-normal text-primary hover:underline" href={`/admin/questions/${q.setItem.questionVersion.questionId}`}>{q.setItem.questionVersion.prompt}</Link><span className="text-sm text-muted-foreground">v{v.version}{v.answerMode === "MULTIPLE" && " · select all that apply"}{q.markedForReview && " · marked for review"}</span></TableCell>
+          <TableCell>{chosen.length ? letters(chosen) : "—"}</TableCell><TableCell>{letters(keys)}</TableCell>
+          <TableCell>{!chosen.length ? <Badge variant="outline">Unanswered</Badge> : isCorrect(v.answerMode, q.answer, keys) ? <Badge>Correct</Badge> : <Badge variant="secondary">Incorrect</Badge>}</TableCell>
         </TableRow>; })}
       </TableBody></Table>
     </CardContent></Card>
