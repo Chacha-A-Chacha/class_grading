@@ -50,5 +50,9 @@ Options are shuffled for each student, so answers that refer to other options
 1. Filter the question bank by **Draft**.
 2. Open each question, check the **Student view** and **Answer and explanation** tabs,
    edit if needed, then choose **Activate after review**.
+   If the file was already reviewed before uploading, filter the bank (for example by
+   status **Draft** and topic **S12 Week 00**) and use **Activate all drafts** instead.
+   It activates every draft matching the filter, all or nothing, after you confirm the
+   review; each activation is recorded in the audit history.
 3. Activated content is frozen. To change it, choose **Create new version**; the active
    version stays in use until the new draft is activated.

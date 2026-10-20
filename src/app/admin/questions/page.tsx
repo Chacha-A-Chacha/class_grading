@@ -2,7 +2,8 @@ import Link from "next/link";
 import { FileUp, Plus } from "lucide-react";
 import { adminPage } from "@/server/auth/http";
 import { getDatabase } from "@/server/db";
-import { listQuestions, PAGE_SIZE, topicSupply, type QuestionFilters } from "@/server/questions/service";
+import { draftsMatching, listQuestions, MAX_BULK_ACTIVATION, PAGE_SIZE, topicSupply, type QuestionFilters } from "@/server/questions/service";
+import { BulkActivate } from "@/components/admin/questions/bulk-activate";
 import { DIFFICULTIES, DIFFICULTY_LABEL, KINDS, KIND_LABEL, STATUSES, STATUS_LABEL } from "@/shared/questions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,8 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
   const filters: QuestionFilters = { q: params.q?.trim().slice(0, 120) || undefined, status: pick(params.status, STATUSES), kind: pick(params.kind, KINDS), difficulty: pick(params.difficulty, DIFFICULTIES), topic: params.topic?.trim().slice(0, 80) || undefined };
   const page = Math.max(1, Math.min(10_000, Number.parseInt(params.page ?? "1", 10) || 1));
   const db = getDatabase();
-  const [{ rows, total }, supply] = await Promise.all([listQuestions(db, filters, page), topicSupply(db)]);
+  const [{ rows, total }, supply, drafts] = await Promise.all([listQuestions(db, filters, page), topicSupply(db), draftsMatching(db, filters)]);
+  const filtered = Object.values(filters).some(Boolean);
   const link = (n: number) => `/admin/questions?${new URLSearchParams(Object.entries({ ...filters, page: String(n) }).filter((e): e is [string, string] => !!e[1]))}`;
   return <div className="space-y-6">
     <div className="flex flex-wrap items-center justify-between gap-4"><div><h1 className="text-3xl font-semibold">Question bank</h1><p className="mt-2 text-muted-foreground">{total} matching question{total === 1 ? "" : "s"}. Only active versions can be used in assessments.</p></div><div className="flex flex-wrap gap-3"><Button asChild variant="outline"><Link href="/admin/questions/import"><FileUp aria-hidden="true" />Import JSON</Link></Button><Button asChild><Link href="/admin/questions/new"><Plus aria-hidden="true" />New question</Link></Button></div></div>
@@ -33,6 +35,7 @@ export default async function QuestionsPage({ searchParams }: { searchParams: Pr
       <NativeSelect aria-label="Topic" name="topic" defaultValue={filters.topic ?? ""}><NativeSelectOption value="">Any topic</NativeSelectOption>{supply.map((s) => <NativeSelectOption key={s.topic} value={s.topic}>{s.topic}</NativeSelectOption>)}</NativeSelect>
       <Button variant="outline">Filter</Button>
     </form>
+    <BulkActivate items={drafts.slice(0, MAX_BULK_ACTIVATION)} tooMany={drafts.length > MAX_BULK_ACTIVATION} filtered={filtered} />
     <Table><TableHeader><TableRow><TableHead>Prompt</TableHead><TableHead>Type</TableHead><TableHead>Difficulty</TableHead><TableHead>Topics</TableHead><TableHead>Status</TableHead></TableRow></TableHeader><TableBody>
       {rows.map((r) => <TableRow key={r.questionId}>
         <TableCell className="max-w-md"><Link className="line-clamp-2 font-medium whitespace-normal text-primary hover:underline" href={`/admin/questions/${r.questionId}`}>{r.prompt}</Link><p className="truncate text-sm text-muted-foreground">{r.objective}</p></TableCell>
