@@ -26,7 +26,7 @@ export default async function RulesPage({ params }: { params: Promise<{ id: stri
     {rules.instructions && <Card><CardHeader><CardTitle><h2>Instructions</h2></CardTitle></CardHeader><CardContent className="whitespace-pre-wrap">{rules.instructions}</CardContent></Card>}
     <Card><CardHeader><CardTitle><h2>Rules</h2></CardTitle></CardHeader><CardContent><ul className="list-disc space-y-2 pl-5">
       <li><strong>Timing:</strong> you have {minutes} minutes from the moment you press Start, with one timer for the whole assessment. It does not pause if you disconnect. You must start by {nairobiFormat.format(assignment.latestStartAt)}.</li>
-      <li><strong>Questions:</strong> {assignment.assessment.blueprintSlots.length} multiple-choice questions with one correct answer each. You can move between questions, change answers and mark questions to review before you submit.</li>
+      <li><strong>Questions:</strong> {assignment.assessment.blueprintSlots.length} multiple-choice questions. A question with more than one correct answer says so, and it scores only if you select every correct option and no others. You can move between questions, change answers and mark questions to review before you submit.</li>
       <li><strong>Saving:</strong> each answer is saved to the server as you choose it, and the screen shows when it is saved. Only answers the server accepts before the deadline count.</li>
       <li><strong>Permitted materials:</strong> {rules.permittedMaterials || "follow your instructor's instructions."}</li>
       <li><strong>If something goes wrong:</strong> reload the page or sign in again on this device to continue; saved answers are kept. Tell your instructor about any problem straight away.</li>
