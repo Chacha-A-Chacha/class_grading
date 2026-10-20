@@ -76,8 +76,15 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   answers. Acceptance checks A01–A04, A08 and A09 run against PostgreSQL in
   `tests/db/attempts.test.ts`.
 
-The device-local recovery queue, takeover and late evidence (milestone 4), live
-monitoring, results release, readiness
+- **Supervision and overrides:** a Live tab per published assessment (status, last
+  contact with neutral connection-gap flags, progress, auto-refresh) and an attempt
+  review page (answers against the key, server timeline, score). The owner can extend
+  an active attempt before its deadline, void an attempt, or authorise a retest with a
+  new schedule; each needs a reason, follows assessment → assignment → attempt lock
+  order and is audited.
+
+The device-local recovery queue, takeover and late evidence (milestone 4), incident
+review, results release, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
 student's name, admission number or login email is not built yet. Liveness only
 proves the application can respond; it does not certify exam readiness.
