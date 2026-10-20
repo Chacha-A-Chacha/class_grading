@@ -1,0 +1,591 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ChallengePurpose {
+  LOGIN
+  TAKEOVER
+}
+
+enum QuestionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum QuestionKind {
+  CODE
+  THEORY
+}
+
+enum ContentKind {
+  TEXT
+  CODE
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum AssessmentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AttemptStatus {
+  ACTIVE
+  SUBMITTED
+  EXPIRED
+  VOIDED
+}
+
+enum EventKind {
+  AWAY
+  SAVE_ERROR
+  CONNECTION_GAP
+  TAKEOVER
+}
+
+enum ReviewStatus {
+  OPEN
+  RESOLVED
+}
+
+enum ReviewDisposition {
+  NO_ISSUE
+  TECHNICAL_ISSUE
+  NEEDS_FOLLOW_UP
+  POLICY_VIOLATION
+}
+
+enum JobKind {
+  RESCORE
+  RETENTION
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// Account creation is enrolment for this single class. No public registration.
+model User {
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email           String                 @unique @db.VarChar(254)
+  displayName     String                 @db.VarChar(120)
+  admissionNumber String?                @unique @db.VarChar(80)
+  isAdmin         Boolean                @default(false)
+  emailVerifiedAt DateTime?              @db.Timestamptz(3)
+  disabledAt      DateTime?              @db.Timestamptz(3)
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @db.Timestamptz(3)
+  sessions        Session[]
+  challenges      EmailLoginChallenge[]
+  authenticator   AdminAuthenticator?
+  assignments     AssessmentAssignment[]
+  auditEntries    AuditLog[]
+  studentImports  StudentImport[]
+  // SQL partial unique index permits at most one isAdmin = true row.
+}
+
+/// Sanitized identity preview only; no workbook or unrelated registration fields.
+model StudentImport {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorId     String    @db.Uuid
+  rows        Json?     @db.JsonB
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt   DateTime  @db.Timestamptz(3)
+  committedAt DateTime? @db.Timestamptz(3)
+  selection   Int[]
+  result      Json?     @db.JsonB
+  actor       User      @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([expiresAt])
+  @@index([actorId, createdAt])
+}
+
+model Session {
+  id                 String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String                @db.Uuid
+  tokenHash          String                @unique @db.Char(64)
+  authenticatedAt    DateTime              @default(now()) @db.Timestamptz(3)
+  mfaVerifiedAt      DateTime?             @db.Timestamptz(3)
+  expiresAt          DateTime              @db.Timestamptz(3)
+  revokedAt          DateTime?             @db.Timestamptz(3)
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  attemptSessions    AttemptSession[]
+  takeoverChallenges EmailLoginChallenge[]
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AdminAuthenticator {
+  userId              String    @id @db.Uuid
+  encryptedTotpSecret Bytes
+  recoveryCodeHashes  String[]
+  confirmedAt         DateTime? @db.Timestamptz(3)
+  lastUsedStep        BigInt?
+  createdAt           DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime  @updatedAt @db.Timestamptz(3)
+  user                User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+}
+
+model EmailLoginChallenge {
+  id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId              String           @db.Uuid
+  purpose             ChallengePurpose
+  codeVerifier        String           @db.Char(64)
+  browserBindingHash  String           @db.Char(64)
+  failedAttempts      Int              @default(0)
+  issuedAt            DateTime         @default(now()) @db.Timestamptz(3)
+  expiresAt           DateTime         @db.Timestamptz(3)
+  resendAvailableAt   DateTime         @db.Timestamptz(3)
+  consumedAt          DateTime?        @db.Timestamptz(3)
+  invalidatedAt       DateTime?        @db.Timestamptz(3)
+  targetAttemptId     String?          @db.Uuid
+  requestingSessionId String?          @db.Uuid
+  // For takeover, verification consumes the code and issues a separate grant.
+  grantHash           String?          @unique @db.Char(64)
+  grantExpiresAt      DateTime?        @db.Timestamptz(3)
+  grantConsumedAt     DateTime?        @db.Timestamptz(3)
+  user                User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  targetAttempt       Attempt?         @relation(fields: [targetAttemptId], references: [id], onDelete: Restrict)
+  requestingSession   Session?         @relation(fields: [requestingSessionId], references: [id], onDelete: Restrict)
+
+  @@index([userId, purpose, issuedAt])
+  @@index([expiresAt])
+  @@index([targetAttemptId])
+  @@index([requestingSessionId])
+}
+
+/// Atomic account/browser/IP buckets persist across OTP challenge replacement.
+model AuthRateLimitBucket {
+  scope       String   @db.VarChar(40)
+  subjectHash String   @db.Char(64)
+  windowStart DateTime @db.Timestamptz(3)
+  count       Int      @default(0)
+  expiresAt   DateTime @db.Timestamptz(3)
+
+  @@id([scope, subjectHash, windowStart])
+  @@index([expiresAt])
+}
+
+model Question {
+  id        String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdAt DateTime          @default(now()) @db.Timestamptz(3)
+  retiredAt DateTime?         @db.Timestamptz(3)
+  versions  QuestionVersion[]
+}
+
+model QuestionVersion {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  questionId      String             @db.Uuid
+  version         Int
+  recordVersion   Int                @default(1)
+  status          QuestionStatus     @default(DRAFT)
+  kind            QuestionKind
+  prompt          String             @db.Text
+  code            String?            @db.Text
+  language        String?            @db.VarChar(40)
+  runtimeContext  String?            @db.Text
+  objective       String             @db.VarChar(160)
+  difficulty      Difficulty
+  expectedSeconds Int
+  explanation     String             @db.Text
+  activatedAt     DateTime?          @db.Timestamptz(3)
+  createdAt       DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+  question        Question           @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  options         QuestionOption[]
+  answerKey       QuestionAnswerKey?
+  topics          QuestionTopic[]
+  setItems        SetItem[]
+  exclusions      ItemExclusion[]
+
+  @@unique([questionId, version])
+  @@unique([id, questionId])
+  @@index([status, objective, kind, difficulty])
+}
+
+model QuestionOption {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  questionVersionId String              @db.Uuid
+  position          Int
+  kind              ContentKind
+  content           String              @db.Text
+  questionVersion   QuestionVersion     @relation(fields: [questionVersionId], references: [id], onDelete: Restrict)
+  answerKeys        QuestionAnswerKey[]
+  attemptOptions    AttemptOption[]
+
+  @@unique([questionVersionId, position])
+  @@unique([id, questionVersionId])
+}
+
+/// Kept separate from question content; never include in student DTOs.
+model QuestionAnswerKey {
+  questionVersionId String          @id @db.Uuid
+  correctOptionId   String          @db.Uuid
+  questionVersion   QuestionVersion @relation(fields: [questionVersionId], references: [id], onDelete: Restrict)
+  correctOption     QuestionOption  @relation(fields: [correctOptionId, questionVersionId], references: [id, questionVersionId], onDelete: Restrict)
+
+  @@index([correctOptionId, questionVersionId])
+}
+
+model Topic {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String          @unique @db.VarChar(80)
+  questions QuestionTopic[]
+  slots     BlueprintSlot[]
+}
+
+model QuestionTopic {
+  questionVersionId String          @db.Uuid
+  topicId           String          @db.Uuid
+  questionVersion   QuestionVersion @relation(fields: [questionVersionId], references: [id], onDelete: Restrict)
+  topic             Topic           @relation(fields: [topicId], references: [id], onDelete: Restrict)
+
+  @@id([questionVersionId, topicId])
+  @@index([topicId, questionVersionId])
+}
+
+model Assessment {
+  id                String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title             String                 @db.VarChar(200)
+  status            AssessmentStatus       @default(DRAFT)
+  durationSeconds   Int
+  passPercent       Decimal                @db.Decimal(5, 2)
+  openAt            DateTime               @db.Timestamptz(3)
+  latestStartAt     DateTime               @db.Timestamptz(3)
+  hardCloseAt       DateTime               @db.Timestamptz(3)
+  rulesVersion      String                 @db.VarChar(80)
+  rulesSnapshot     Json                   @db.JsonB
+  maxOverlapPercent Decimal                @default(30) @db.Decimal(5, 2)
+  releaseHeld       Boolean                @default(false)
+  publishedAt       DateTime?              @db.Timestamptz(3)
+  releasedAt        DateTime?              @db.Timestamptz(3)
+  scoringRevision   Int                    @default(1)
+  recordVersion     Int                    @default(1)
+  createdAt         DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime               @updatedAt @db.Timestamptz(3)
+  blueprintSlots    BlueprintSlot[]
+  sets              AssessmentSet[]
+  assignments       AssessmentAssignment[]
+  exclusions        ItemExclusion[]
+  jobs              Job[]
+
+  @@index([status, openAt])
+}
+
+/// Blueprint belongs directly to an assessment; reusable blueprint library deferred.
+model BlueprintSlot {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assessmentId String       @db.Uuid
+  position     Int
+  objective    String       @db.VarChar(160)
+  topicId      String       @db.Uuid
+  kind         QuestionKind
+  difficulty   Difficulty
+  maxSeconds   Int?
+  assessment   Assessment   @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  topic        Topic        @relation(fields: [topicId], references: [id], onDelete: Restrict)
+
+  @@unique([assessmentId, position])
+  @@index([topicId])
+}
+
+model AssessmentSet {
+  id           String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assessmentId String     @db.Uuid
+  label        String     @db.VarChar(80)
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  items        SetItem[]
+  attempts     Attempt[]
+
+  @@unique([assessmentId, label])
+  @@unique([id, assessmentId])
+}
+
+model SetItem {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  setId             String            @db.Uuid
+  questionId        String            @db.Uuid
+  questionVersionId String            @db.Uuid
+  position          Int
+  set               AssessmentSet     @relation(fields: [setId], references: [id], onDelete: Restrict)
+  questionVersion   QuestionVersion   @relation(fields: [questionVersionId, questionId], references: [id, questionId], onDelete: Restrict)
+  attemptQuestions  AttemptQuestion[]
+
+  @@unique([setId, position])
+  @@unique([setId, questionId])
+  @@unique([id, setId, questionVersionId])
+  @@index([questionVersionId, questionId])
+}
+
+model AssessmentAssignment {
+  id                  String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assessmentId        String     @db.Uuid
+  userId              String     @db.Uuid
+  durationSeconds     Int
+  openAt              DateTime   @db.Timestamptz(3)
+  latestStartAt       DateTime   @db.Timestamptz(3)
+  hardCloseAt         DateTime   @db.Timestamptz(3)
+  allowedAttemptCount Int        @default(1)
+  accommodationReason String?    @db.Text
+  revokedAt           DateTime?  @db.Timestamptz(3)
+  recordVersion       Int        @default(1)
+  createdAt           DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime   @updatedAt @db.Timestamptz(3)
+  assessment          Assessment @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  user                User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  attempts            Attempt[]
+
+  @@unique([assessmentId, userId])
+  @@unique([id, assessmentId])
+  @@index([userId, assessmentId])
+  @@index([assessmentId, hardCloseAt])
+}
+
+model Attempt {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assignmentId        String                @db.Uuid
+  assessmentId        String                @db.Uuid
+  setId               String                @db.Uuid
+  attemptNumber       Int
+  startRequestId      String                @db.Uuid
+  status              AttemptStatus         @default(ACTIVE)
+  startedAt           DateTime              @db.Timestamptz(3)
+  expiresAt           DateTime              @db.Timestamptz(3)
+  hardCloseAt         DateTime              @db.Timestamptz(3)
+  submittedAt         DateTime?             @db.Timestamptz(3)
+  terminalAt          DateTime?             @db.Timestamptz(3)
+  terminalReason      String?               @db.Text
+  submissionReceiptId String?               @unique @db.Uuid
+  passPercent         Decimal               @db.Decimal(5, 2)
+  rulesVersion        String                @db.VarChar(80)
+  rulesSnapshot       Json                  @db.JsonB
+  acknowledgedAt      DateTime              @db.Timestamptz(3)
+  currentGeneration   Int                   @default(1)
+  recordVersion       Int                   @default(1)
+  lastSeenAt          DateTime?             @db.Timestamptz(3)
+  createdAt           DateTime              @default(now()) @db.Timestamptz(3)
+  assignment          AssessmentAssignment  @relation(fields: [assignmentId, assessmentId], references: [id, assessmentId], onDelete: Restrict)
+  set                 AssessmentSet         @relation(fields: [setId, assessmentId], references: [id, assessmentId], onDelete: Restrict)
+  questions           AttemptQuestion[]
+  sessions            AttemptSession[]
+  events              AttemptEvent[]
+  lateEvidence        LateAnswerEvidence[]
+  scores              ScoreRevision[]
+  reviewCases         ReviewCase[]
+  challenges          EmailLoginChallenge[]
+  // SQL: one ACTIVE attempt per assignment; partial (expiresAt, id) worker index.
+
+  @@unique([assignmentId, attemptNumber])
+  @@unique([assignmentId, startRequestId])
+  @@unique([id, setId])
+  @@index([assessmentId, status])
+  @@index([setId, assessmentId])
+}
+
+model AttemptQuestion {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attemptId         String           @db.Uuid
+  setId             String           @db.Uuid
+  setItemId         String           @db.Uuid
+  questionVersionId String           @db.Uuid
+  markedForReview   Boolean          @default(false)
+  attempt           Attempt          @relation(fields: [attemptId, setId], references: [id, setId], onDelete: Restrict)
+  setItem           SetItem          @relation(fields: [setItemId, setId, questionVersionId], references: [id, setId, questionVersionId], onDelete: Restrict)
+  options           AttemptOption[]
+  answer            AttemptAnswer?
+  mutations         AnswerMutation[]
+
+  @@unique([attemptId, setItemId])
+  @@unique([id, questionVersionId])
+  @@unique([id, attemptId])
+  @@index([setItemId, setId, questionVersionId])
+}
+
+model AttemptOption {
+  attemptQuestionId String           @db.Uuid
+  questionOptionId  String           @db.Uuid
+  questionVersionId String           @db.Uuid
+  displayPosition   Int
+  question          AttemptQuestion  @relation(fields: [attemptQuestionId, questionVersionId], references: [id, questionVersionId], onDelete: Restrict)
+  option            QuestionOption   @relation(fields: [questionOptionId, questionVersionId], references: [id, questionVersionId], onDelete: Restrict)
+  answers           AttemptAnswer[]
+  mutations         AnswerMutation[]
+
+  @@id([attemptQuestionId, questionOptionId])
+  @@unique([attemptQuestionId, displayPosition])
+  @@index([questionOptionId, questionVersionId])
+}
+
+model AttemptAnswer {
+  attemptQuestionId String          @id @db.Uuid
+  selectedOptionId  String?         @db.Uuid
+  revision          Int
+  acceptedAt        DateTime        @db.Timestamptz(3)
+  sessionGeneration Int
+  lastSequence      Int
+  question          AttemptQuestion @relation(fields: [attemptQuestionId], references: [id], onDelete: Restrict)
+  selectedOption    AttemptOption?  @relation(fields: [attemptQuestionId, selectedOptionId], references: [attemptQuestionId, questionOptionId], onDelete: Restrict)
+  // No row means never answered; null selection means explicitly cleared.
+}
+
+model AttemptSession {
+  attemptId     String           @db.Uuid
+  generation    Int
+  userSessionId String?          @db.Uuid
+  createdAt     DateTime         @default(now()) @db.Timestamptz(3)
+  revokedAt     DateTime?        @db.Timestamptz(3)
+  attempt       Attempt          @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  userSession   Session?         @relation(fields: [userSessionId], references: [id], onDelete: SetNull)
+  mutations     AnswerMutation[]
+
+  @@id([attemptId, generation])
+  @@index([userSessionId])
+}
+
+/// Append-only accepted mutations; rejected offline payloads go to evidence.
+model AnswerMutation {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attemptId         String          @db.Uuid
+  attemptQuestionId String          @db.Uuid
+  clientMutationId  String          @db.Uuid
+  selectedOptionId  String?         @db.Uuid
+  sessionGeneration Int
+  sequence          Int
+  resultRevision    Int
+  payloadHash       String          @db.Char(64)
+  acceptedAt        DateTime        @db.Timestamptz(3)
+  question          AttemptQuestion @relation(fields: [attemptQuestionId, attemptId], references: [id, attemptId], onDelete: Restrict)
+  selectedOption    AttemptOption?  @relation(fields: [attemptQuestionId, selectedOptionId], references: [attemptQuestionId, questionOptionId], onDelete: Restrict)
+  session           AttemptSession  @relation(fields: [attemptId, sessionGeneration], references: [attemptId, generation], onDelete: Restrict)
+
+  @@unique([attemptId, clientMutationId])
+  @@unique([attemptQuestionId, sessionGeneration, sequence])
+  @@unique([attemptQuestionId, resultRevision])
+  @@index([attemptId, acceptedAt, id])
+  @@index([attemptId, sessionGeneration])
+}
+
+/// One aggregated away/gap interval; heartbeat updates only Attempt.lastSeenAt.
+model AttemptEvent {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attemptId        String    @db.Uuid
+  clientEventId    String    @db.Uuid
+  kind             EventKind
+  clientOccurredAt DateTime? @db.Timestamptz(3)
+  clientEndedAt    DateTime? @db.Timestamptz(3)
+  serverReceivedAt DateTime  @default(now()) @db.Timestamptz(3)
+  metadata         Json?     @db.JsonB
+  attempt          Attempt   @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, clientEventId])
+  @@index([attemptId, serverReceivedAt, id])
+  @@index([serverReceivedAt])
+}
+
+/// Untrusted payload, deliberately outside the scored-answer relations.
+model LateAnswerEvidence {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attemptId        String    @db.Uuid
+  clientMutationId String    @db.Uuid
+  clientOccurredAt DateTime? @db.Timestamptz(3)
+  serverReceivedAt DateTime  @default(now()) @db.Timestamptz(3)
+  payload          Json      @db.JsonB
+  payloadHash      String    @db.Char(64)
+  attempt          Attempt   @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@unique([attemptId, clientMutationId])
+  @@index([serverReceivedAt])
+}
+
+model ScoreRevision {
+  attemptId       String   @db.Uuid
+  scoringRevision Int
+  rawCorrect      Int
+  availablePoints Int
+  // Null when availablePoints = 0 (ungradable). Percentage is derived exactly.
+  passed          Boolean?
+  computedAt      DateTime @default(now()) @db.Timestamptz(3)
+  attempt         Attempt  @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@id([attemptId, scoringRevision])
+}
+
+model ItemExclusion {
+  assessmentId      String          @db.Uuid
+  questionVersionId String          @db.Uuid
+  scoringRevision   Int
+  reason            String          @db.Text
+  createdAt         DateTime        @default(now()) @db.Timestamptz(3)
+  assessment        Assessment      @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  questionVersion   QuestionVersion @relation(fields: [questionVersionId], references: [id], onDelete: Restrict)
+
+  @@id([assessmentId, questionVersionId])
+  @@index([questionVersionId])
+}
+
+model ReviewCase {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  attemptId   String             @db.Uuid
+  status      ReviewStatus       @default(OPEN)
+  disposition ReviewDisposition?
+  reason      String             @db.Text
+  resolution  String?            @db.Text
+  createdAt   DateTime           @default(now()) @db.Timestamptz(3)
+  resolvedAt  DateTime?          @db.Timestamptz(3)
+  attempt     Attempt            @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+
+  @@index([attemptId, status])
+  @@index([status, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String   @db.VarChar(80)
+  targetType String   @db.VarChar(80)
+  targetId   String   @db.Uuid
+  reason     String   @db.Text
+  metadata   Json?    @db.JsonB
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([targetType, targetId, createdAt, id])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+model Job {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind             JobKind
+  status           JobStatus   @default(PENDING)
+  assessmentId     String?     @db.Uuid
+  scoringRevision  Int?
+  deduplicationKey String      @unique @db.VarChar(200)
+  payload          Json?       @db.JsonB
+  availableAt      DateTime    @default(now()) @db.Timestamptz(3)
+  leaseUntil       DateTime?   @db.Timestamptz(3)
+  leaseToken       String?     @db.Uuid
+  attempts         Int         @default(0)
+  lastError        String?     @db.Text
+  createdAt        DateTime    @default(now()) @db.Timestamptz(3)
+  completedAt      DateTime?   @db.Timestamptz(3)
+  assessment       Assessment? @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  // SQL partial indexes cover pending work and expired leases separately.
+
+  @@index([assessmentId, status])
+}
