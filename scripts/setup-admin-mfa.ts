@@ -10,7 +10,9 @@ async function main() {
   if (!process.stdin.isTTY) throw new Error("Run this command in your own interactive terminal to set up the authenticator.");
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("Configure DATABASE_URL first.");
-  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString, max: 1, options: "-c timezone=UTC" }, { schema: new URL(connectionString).searchParams.get("schema") ?? "public" }) });
+  const schema = new URL(connectionString).searchParams.get("schema") ?? "public";
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(schema)) throw new Error("DATABASE_URL schema must be a plain identifier.");
+  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString, max: 1, options: `-c timezone=UTC -c search_path=${schema}` }, { schema }) });
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   try {
     const owner = await db.user.findFirst({ where: { isAdmin: true, disabledAt: null }, include: { authenticator: true } });

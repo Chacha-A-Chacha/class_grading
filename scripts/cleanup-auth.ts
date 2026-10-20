@@ -7,7 +7,9 @@ import { PrismaClient } from "../src/generated/prisma/client";
 async function main() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("DATABASE_URL is required.");
-  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString, max: 1, options: "-c timezone=UTC", application_name: "cleanup" }, { schema: new URL(connectionString).searchParams.get("schema") ?? "public" }) });
+  const schema = new URL(connectionString).searchParams.get("schema") ?? "public";
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(schema)) throw new Error("DATABASE_URL schema must be a plain identifier.");
+  const db = new PrismaClient({ adapter: new PrismaPg({ connectionString, max: 1, options: `-c timezone=UTC -c search_path=${schema}`, application_name: "cleanup" }, { schema }) });
   try {
     // Expired previews hold names and emails; keep only committed receipts.
     const previews = await db.$executeRaw`UPDATE "StudentImport" SET "rows" = NULL WHERE "rows" IS NOT NULL AND "expiresAt" <= clock_timestamp()`;

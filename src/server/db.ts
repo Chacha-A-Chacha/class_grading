@@ -17,6 +17,7 @@ export function getDatabase(): PrismaClient {
   }
 
   const schema = new URL(connectionString).searchParams.get("schema") ?? "public";
+  if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(schema)) throw new Error("DATABASE_URL schema must be a plain identifier.");
   const adapter = new PrismaPg({
     connectionString,
     max,
@@ -28,7 +29,9 @@ export function getDatabase(): PrismaClient {
     lock_timeout: 2_000,
     idle_in_transaction_session_timeout: 10_000,
     application_name: process.env.DB_APP_NAME ?? "web",
-    options: "-c timezone=UTC",
+    // Raw SQL ($queryRaw) resolves unqualified tables through search_path, not the
+    // adapter's schema option, so both must name the same schema.
+    options: `-c timezone=UTC -c search_path=${schema}`,
   }, { schema });
 
   globalDatabase.database = new PrismaClient({
