@@ -84,6 +84,11 @@ enum JobStatus {
   FAILED
 }
 
+enum EmailDeliveryStatus {
+  SENT
+  FAILED
+}
+
 /// Account creation is enrolment for this single class. No public registration.
 model User {
   id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -101,6 +106,7 @@ model User {
   assignments     AssessmentAssignment[]
   auditEntries    AuditLog[]
   studentImports  StudentImport[]
+  emailDeliveries EmailDelivery[]
   // SQL partial unique index permits at most one isAdmin = true row.
 }
 
@@ -173,6 +179,26 @@ model EmailLoginChallenge {
   @@index([expiresAt])
   @@index([targetAttemptId])
   @@index([requestingSessionId])
+}
+
+/// One row per sign-in email handed to the mail server; never stores the code or address.
+/// Kept 30 days for delivery support, independent of the short-lived challenge rows.
+model EmailDelivery {
+  id          String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String              @db.Uuid
+  challengeId String              @db.Uuid
+  purpose     ChallengePurpose
+  status      EmailDeliveryStatus
+  durationMs  Int
+  smtpCode    Int?
+  errorCode   String?             @db.VarChar(40)
+  stage       String?             @db.VarChar(40)
+  detail      String?             @db.VarChar(300)
+  createdAt   DateTime            @default(now()) @db.Timestamptz(3)
+  user        User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
 }
 
 /// Atomic account/browser/IP buckets persist across OTP challenge replacement.

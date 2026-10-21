@@ -8,6 +8,7 @@ import { authCookie, clientIp, saveAuthCookie } from "@/server/auth/http";
 import { hash, secret, token } from "@/server/auth/crypto";
 import { issueCode } from "@/server/auth/service";
 import { deliverCode, mailTransport } from "@/server/auth/email";
+import { failedOutcome, recordDelivery, sentOutcome } from "@/server/auth/delivery";
 
 // Known and unknown addresses take different database paths; pad every response to
 // a common floor so timing does not reveal the enrolment list (spec §3, step 1).
@@ -27,10 +28,13 @@ export const POST = endpoint(async (request) => {
   await saveAuthCookie({ ...binding });
   after(async () => {
     if (!delivery) return;
-    try { await deliverCode(delivery.email, delivery.code); }
-    catch {
+    const sending = performance.now();
+    const logged = { userId: delivery.userId, challengeId: delivery.challengeId, purpose: "LOGIN" as const };
+    try { await recordDelivery(db, logged, sentOutcome(await deliverCode(delivery.email, delivery.code)), performance.now() - sending); }
+    catch (error) {
+      const took = performance.now() - sending;
       await db.emailLoginChallenge.updateMany({ where: { id: delivery.challengeId, consumedAt: null }, data: { invalidatedAt: new Date() } });
-      console.error("Login email delivery failed", delivery.challengeId);
+      await recordDelivery(db, logged, failedOutcome(error), took);
     }
   });
   await sleep(Math.max(0, RESPONSE_FLOOR_MS - (performance.now() - started)) + randomInt(0, 50));

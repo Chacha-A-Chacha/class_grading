@@ -63,7 +63,7 @@ export async function issueCode(db: PrismaClient, email: string, browser: string
       id: binding.challengeId, userId: user.id, purpose: "LOGIN", codeVerifier: verifier(binding.challengeId, code), browserBindingHash: hash(browser),
       issuedAt: time, expiresAt: new Date(time.getTime() + 120_000), resendAvailableAt: new Date(time.getTime() + 30_000),
     } });
-    return { email: user.email, code, challengeId: binding.challengeId };
+    return { userId: user.id, email: user.email, code, challengeId: binding.challengeId };
   });
   return { binding, delivery: result };
 }

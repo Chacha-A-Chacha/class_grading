@@ -90,6 +90,7 @@ Indexes follow actual queries:
 | Review timeline | `(attemptId, serverReceivedAt, id)` and mutation acceptance-time index |
 | Worker claims/recovery | Partial pending-job and running-lease indexes |
 | Authentication/retention | Token hash, user, and expiry indexes |
+| Sign-in email log | `EmailDelivery` `(createdAt)` for the admin log and 30-day pruning, `(userId, createdAt)` for the student page. Rows keep the challenge id without a foreign key so they outlive deleted challenges, and never store the code or address. |
 
 Unique constraints already provide indexes. Do not add duplicate indexes on their
 leftmost prefixes. Keep arbitrary JSONB unindexed until a real query requires it.

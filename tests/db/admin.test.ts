@@ -13,6 +13,7 @@ import { encrypt, hash, token, verifier } from "../../src/server/auth/crypto";
 import { assertAdmin, consume, getSession, issueCode, verifyCode, verifyMfa } from "../../src/server/auth/service";
 import { addStudent, commitImport, createPreview, resetSignInLimits, setStudentStatus } from "../../src/server/students/service";
 import { normalizeRows } from "../../src/shared/students";
+import { failedOutcome, recordDelivery, sentOutcome } from "../../src/server/auth/delivery";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL explicitly. Tests never default to the application database.");
@@ -170,4 +171,19 @@ test("with owner MFA off (the default), an email code grants a full admin sessio
     assert.ok((await createPreview(db, session.id, importRows(`${randomUUID()}@example.test`))).id);
     await assert.rejects(verifyMfa(db, raw, "000000"), /not enabled/);
   } finally { process.env.ADMIN_MFA = "required"; }
+});
+
+test("sign-in email outcomes are logged without the code or address and outlive their challenge", async () => {
+  const user = await student();
+  const { delivery } = await issueCode(db, user.email, token(), "test");
+  assert.ok(delivery); assert.equal(delivery.userId, user.id);
+  const logged = { userId: user.id, challengeId: delivery.challengeId, purpose: "LOGIN" as const };
+  await recordDelivery(db, logged, sentOutcome(`250 OK queued for ${user.email}`), 640.4);
+  const error = Object.assign(new Error("rejected"), { code: "EENVELOPE", command: "RCPT TO", responseCode: 550, response: `550 <${user.email}> code ${delivery.code} rejected` });
+  await recordDelivery(db, logged, failedOutcome(error), 5012);
+  await db.emailLoginChallenge.delete({ where: { id: delivery.challengeId } });
+  const rows = await db.emailDelivery.findMany({ where: { userId: user.id }, orderBy: { durationMs: "asc" } });
+  assert.deepEqual(rows.map((r) => [r.status, r.durationMs, r.smtpCode, r.errorCode, r.stage]), [["SENT", 640, 250, null, null], ["FAILED", 5012, 550, "EENVELOPE", "RCPT TO"]]);
+  for (const row of rows) { assert.ok(!row.detail!.includes(user.email)); assert.ok(!row.detail!.includes(delivery.code)); }
+  await assert.rejects(db.$executeRaw`INSERT INTO "EmailDelivery" ("userId", "challengeId", purpose, status, "durationMs") VALUES (${user.id}::uuid, gen_random_uuid(), 'LOGIN', 'SENT', -1)`);
 });
