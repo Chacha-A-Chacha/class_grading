@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "../../generated/prisma/client";
 import { type Details, type Slot, fromNairobiInput, overlapPercent, setLabel } from "../../shared/assessments";
+import { MONITORING_RULES_VERSION } from "../../shared/monitoring";
 import { assertAdmin, now } from "../auth/service";
 import { AppError } from "../errors";
 import { type Candidate, generateSets } from "./generate";
@@ -35,7 +36,7 @@ function schedule(base: { durationSeconds: number; openAt: Date; latestStartAt: 
 export async function createAssessment(db: PrismaClient, sessionId: string, d: Details) {
   return db.$transaction(async (tx) => {
     const admin = await assertAdmin(tx, sessionId);
-    const created = await tx.assessment.create({ data: { ...settings(d), rulesVersion: "1" }, select: { id: true } });
+    const created = await tx.assessment.create({ data: { ...settings(d), rulesVersion: MONITORING_RULES_VERSION }, select: { id: true } });
     await audit(tx, admin.userId, "ASSESSMENT_CREATED", created.id, "Owner created a draft assessment.");
     return created;
   });

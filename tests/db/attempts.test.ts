@@ -8,6 +8,7 @@ import path from "node:path";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
+import { MONITORING_RULES_VERSION } from "../../src/shared/monitoring";
 import { hash, token } from "../../src/server/auth/crypto";
 import { questionSchema } from "../../src/shared/questions";
 import { detailsSchema, toNairobiInput } from "../../src/shared/assessments";
@@ -15,6 +16,8 @@ import type { Mutation } from "../../src/shared/attempts";
 import { activateDraft, createQuestion } from "../../src/server/questions/service";
 import { createAssessment, generateAssessmentSets, publishAssessment, saveBlueprint, setAudience } from "../../src/server/assessments/service";
 import { expireOverdue, getAttemptView, heartbeat, saveAnswers, startAttempt, submitAttempt } from "../../src/server/attempts/service";
+import { recordAwayEvents } from "../../src/server/attempts/events";
+import type { AwayEvent } from "../../src/shared/monitoring";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL explicitly. Tests never default to the application database.");
@@ -53,7 +56,7 @@ async function published(userIds = students.map((s) => s.id), patch = {}) {
   await publishAssessment(db, owner, id, 4);
   return id;
 }
-const start = (s: { id: string; session: string }, assessmentId: string, key = randomUUID()) => startAttempt(db, s.id, s.session, assessmentId, key, "1");
+const start = (s: { id: string; session: string }, assessmentId: string, key = randomUUID()) => startAttempt(db, s.id, s.session, assessmentId, key, MONITORING_RULES_VERSION);
 async function correctOption(attemptQuestionId: string) {
   const q = await db.attemptQuestion.findUniqueOrThrow({ where: { id: attemptQuestionId }, select: { setItem: { select: { questionVersion: { select: { answerKeys: true } } } } } });
   return q.setItem.questionVersion.answerKeys[0].correctOptionId;
@@ -168,4 +171,56 @@ test("heartbeat records contact and returns server time without changing answers
   assert.equal(state.status, "ACTIVE"); assert.ok(Math.abs(Date.parse(state.serverNow) - Date.now()) < 60_000);
   assert.ok((await db.attempt.findUniqueOrThrow({ where: { id: attemptId } })).lastSeenAt);
   await assert.rejects(heartbeat(db, students[0].id, attemptId), (e) => code(e) === "NOT_FOUND");
+});
+
+const away = (patch: Partial<AwayEvent> = {}): AwayEvent => ({ clientEventId: randomUUID(), sessionGeneration: 1, startedAt: new Date(Date.now() - 8000).toISOString(), endedAt: null, reasons: ["blur"], device: { type: "phone", os: "Android" }, ...patch });
+
+test("away periods are recorded once, closed once, and never touch the attempt or its answers", async () => {
+  const id = await published([students[0].id]);
+  const { attemptId } = await start(students[0], id);
+  assert.equal((await getAttemptView(db, students[0].id, attemptId)).monitoring, true);
+  const before = await db.attempt.findUniqueOrThrow({ where: { id: attemptId } });
+  const open = away();
+  assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [open]), { recorded: 1, ignored: 0 });
+  assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [open]), { recorded: 0, ignored: 1 }, "retried open report is a duplicate");
+  const end = new Date(Date.now() - 2000).toISOString();
+  const closed = { ...open, endedAt: end, reasons: ["blur", "hidden"] as AwayEvent["reasons"], startedAt: new Date(Date.now() - 60_000).toISOString() };
+  assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [closed]), { recorded: 1, ignored: 0 });
+  assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [{ ...closed, endedAt: new Date().toISOString() }]), { recorded: 0, ignored: 1 }, "the end is set only once");
+  const [row] = await db.attemptEvent.findMany({ where: { attemptId } });
+  assert.equal(row.kind, "AWAY");
+  assert.equal(row.clientOccurredAt!.toISOString(), open.startedAt, "start time is immutable");
+  assert.equal(row.clientEndedAt!.toISOString(), end);
+  assert.deepEqual((row.metadata as { reasons: string[] }).reasons, ["blur", "hidden"]);
+  assert.deepEqual((row.metadata as { device: unknown }).device, { type: "phone", os: "Android" });
+  const after = await db.attempt.findUniqueOrThrow({ where: { id: attemptId } });
+  assert.deepEqual([after.status, after.recordVersion, after.expiresAt.getTime()], [before.status, before.recordVersion, before.expiresAt.getTime()]);
+  assert.equal(await db.answerMutation.count({ where: { attemptId } }), 0);
+});
+
+test("away reports are refused for other students and ignored from superseded sessions or after submission", async () => {
+  const id = await published([students[1].id, students[2].id]);
+  const { attemptId } = await start(students[1], id);
+  await assert.rejects(recordAwayEvents(db, students[2].id, attemptId, [away()]), (e) => code(e) === "NOT_FOUND");
+  assert.deepEqual(await recordAwayEvents(db, students[1].id, attemptId, [away({ sessionGeneration: 2 })]), { recorded: 0, ignored: 1 });
+  const open = away();
+  await recordAwayEvents(db, students[1].id, attemptId, [open]);
+  await submitAttempt(db, students[1].id, attemptId, randomUUID(), []);
+  // After submission a new departure is not recorded, but the open one may still be closed.
+  assert.deepEqual(await recordAwayEvents(db, students[1].id, attemptId, [away(), { ...open, endedAt: new Date().toISOString() }]), { recorded: 1, ignored: 1 });
+  assert.equal(await db.attemptEvent.count({ where: { attemptId } }), 1);
+  assert.equal((await db.attemptEvent.findFirstOrThrow({ where: { attemptId } })).clientEndedAt !== null, true);
+});
+
+test("assessments on rules version 1 are never observed", async () => {
+  const { id } = await createAssessment(db, owner, detailsSchema.parse({ title: "Old rules", durationMinutes: 20, passPercent: 50, openAt: at(-1), latestStartAt: at(2), hardCloseAt: at(3) }));
+  await db.assessment.update({ where: { id }, data: { rulesVersion: "1" } });
+  await saveBlueprint(db, owner, id, 1, [0, 1].map(() => ({ topicId: loops, objective: "", kind: "THEORY" as const, difficulty: "EASY" as const, maxSeconds: null })));
+  assert.ok((await generateAssessmentSets(db, owner, id, 2, 2)).ok);
+  await setAudience(db, owner, id, 3, [students[0].id]);
+  await publishAssessment(db, owner, id, 4);
+  const { attemptId } = await startAttempt(db, students[0].id, students[0].session, id, randomUUID(), "1");
+  assert.equal((await getAttemptView(db, students[0].id, attemptId)).monitoring, false);
+  await assert.rejects(recordAwayEvents(db, students[0].id, attemptId, [away()]), (e) => code(e) === "MONITORING_OFF");
+  assert.equal(await db.attemptEvent.count({ where: { attemptId } }), 0);
 });

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { studentPage } from "@/server/auth/http";
 import { getDatabase } from "@/server/db";
+import { monitorsFocus } from "@/shared/monitoring";
 import { nairobiFormat } from "@/shared/assessments";
 import { StartAttempt } from "@/components/student/start-attempt";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,6 +29,7 @@ export default async function RulesPage({ params }: { params: Promise<{ id: stri
       <li><strong>Timing:</strong> you have {minutes} minutes from the moment you press Start, with one timer for the whole assessment. It does not pause if you disconnect. You must start by {nairobiFormat.format(assignment.latestStartAt)}.</li>
       <li><strong>Questions:</strong> {assignment.assessment.blueprintSlots.length} multiple-choice questions. A question with more than one correct answer says so, and it scores only if you select every correct option and no others. You can move between questions, change answers and mark questions to review before you submit.</li>
       <li><strong>Saving:</strong> each answer is saved to the server as you choose it, and the screen shows when it is saved. Only answers the server accepts before the deadline count.</li>
+      {monitorsFocus(assignment.assessment.rulesVersion) && <li><strong>Page activity:</strong> while you are answering, your browser records each time this page is hidden or loses focus, for example when you switch tabs or apps, minimise the window or lock your phone. Each record has the time, how long you were away and your device type (phone, tablet or computer, and its operating system). Nothing else on your device is seen. Your instructor sees these records only when reviewing attempts, to understand problems such as lost connections. They never change your score or end your attempt on their own. Records are deleted 90 days after results are released. To ask about a record, contact your instructor with your attempt reference.</li>}
       <li><strong>Permitted materials:</strong> {rules.permittedMaterials || "follow your instructor's instructions."}</li>
       <li><strong>If something goes wrong:</strong> reload the page or sign in again on this device to continue; saved answers are kept. Tell your instructor about any problem straight away.</li>
       <li><strong>Results:</strong> released after every student&apos;s answering window has closed. You can ask your instructor to review your attempt.</li>

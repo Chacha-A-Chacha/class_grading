@@ -34,6 +34,8 @@ export type AttemptView = AttemptState & {
   attemptId: string;
   title: string;
   rules: { instructions: string; permittedMaterials: string };
+  /** Rules version 2+: the student was told that leaving the page is recorded. */
+  monitoring: boolean;
   submittedAt: string | null;
   questions: {
     id: string; position: number; kind: "CODE" | "THEORY"; answerMode: "SINGLE" | "MULTIPLE"; prompt: string; code: string | null; language: string | null; runtimeContext: string | null; markedForReview: boolean;

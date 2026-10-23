@@ -8,6 +8,7 @@ import path from "node:path";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
+import { MONITORING_RULES_VERSION } from "../../src/shared/monitoring";
 import { hash, token } from "../../src/server/auth/crypto";
 import { questionSchema } from "../../src/shared/questions";
 import { detailsSchema, toNairobiInput } from "../../src/shared/assessments";
@@ -55,7 +56,7 @@ async function published() {
   await publishAssessment(db, owner, id, 4);
   return id;
 }
-const start = (s: (typeof students)[number], assessmentId: string) => startAttempt(db, s.id, s.session, assessmentId, randomUUID(), "1");
+const start = (s: (typeof students)[number], assessmentId: string) => startAttempt(db, s.id, s.session, assessmentId, randomUUID(), MONITORING_RULES_VERSION);
 
 test("extensions move the deadline, stretch the student's hard close and need the current version", async () => {
   const id = await published();

@@ -8,6 +8,7 @@ import path from "node:path";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
+import { MONITORING_RULES_VERSION } from "../../src/shared/monitoring";
 import { hash, token } from "../../src/server/auth/crypto";
 import { questionSchema } from "../../src/shared/questions";
 import { detailsSchema, toNairobiInput } from "../../src/shared/assessments";
@@ -47,7 +48,7 @@ before(async () => {
 after(async () => { await db.$disconnect(); await pool.end(); if (created && /^grading_multi_test_[a-f0-9]{32}$/.test(schema)) await adminPool.query(`DROP SCHEMA "${schema}" CASCADE`); await adminPool.end(); });
 
 async function attempt(i: number) {
-  const { attemptId } = await startAttempt(db, students[i].id, students[i].session, assessmentId, randomUUID(), "1");
+  const { attemptId } = await startAttempt(db, students[i].id, students[i].session, assessmentId, randomUUID(), MONITORING_RULES_VERSION);
   const [q] = (await getAttemptView(db, students[i].id, attemptId)).questions;
   const byContent = (c: string) => q.options.find((o) => o.content === c)!.id;
   return { attemptId, q, byContent };

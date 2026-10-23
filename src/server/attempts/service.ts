@@ -4,6 +4,7 @@ import { type AttemptState, type AttemptView, type Mutation, type MutationReceip
 import { now } from "../auth/service";
 import { AppError } from "../errors";
 import { withRetry } from "../retry";
+import { monitorsFocus } from "../../shared/monitoring";
 
 type Tx = Prisma.TransactionClient;
 type Locked = { id: string; status: AttemptState["status"]; expiresAt: Date; currentGeneration: number; assessmentId: string; passPercent: Prisma.Decimal; submissionReceiptId: string | null; submittedAt: Date | null };
@@ -228,7 +229,7 @@ export async function getAttemptView(db: PrismaClient, userId: string, attemptId
     return { attempt: await resolveOverdue(tx, attempt, time), time };
   }));
   const a = await db.attempt.findUniqueOrThrow({ where: { id: attemptId }, select: {
-    rulesSnapshot: true, submittedAt: true, assignment: { select: { assessment: { select: { title: true } } } },
+    rulesSnapshot: true, rulesVersion: true, submittedAt: true, assignment: { select: { assessment: { select: { title: true } } } },
     questions: { orderBy: { setItem: { position: "asc" } }, select: {
       id: true, markedForReview: true, answer: { select: { selectedOptionId: true, selectedOptionIds: true, revision: true, sessionGeneration: true, lastSequence: true } },
       setItem: { select: { position: true, questionVersion: { select: { kind: true, answerMode: true, prompt: true, code: true, language: true, runtimeContext: true } } } },
@@ -239,6 +240,7 @@ export async function getAttemptView(db: PrismaClient, userId: string, attemptId
   return {
     ...state(resolved.attempt, resolved.time), attemptId, title: a.assignment.assessment.title, submittedAt: a.submittedAt?.toISOString() ?? null,
     rules: { instructions: rules.instructions ?? "", permittedMaterials: rules.permittedMaterials ?? "" },
+    monitoring: monitorsFocus(a.rulesVersion),
     questions: a.questions.map((q) => ({ id: q.id, position: q.setItem.position, ...q.setItem.questionVersion, markedForReview: q.markedForReview, answer: q.answer, options: q.options.map((o) => o.option) })),
   };
 }

@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
+import { useAwayTracking } from "./use-away-tracking";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 const HEARTBEAT_MS = 15_000;
@@ -145,6 +146,9 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     void fetch(`/api/v1/attempts/${id}/heartbeat`, { method: "POST" }).then((r) => r.ok ? r.json() : null).then((s) => s && sync(s)).finally(() => { resolving.current = false; });
   }, [active, remaining, id, sync]);
 
+  // Rules version 2+ told the student this is recorded; it never pauses or ends the exam.
+  const away = useAwayTracking({ attemptId: id, generation, enabled: initial.monitoring && active });
+
   if (!active) {
     const submittedAt = receipt?.submittedAt ?? initial.submittedAt;
     return <Card className="max-w-2xl"><CardHeader><CardTitle><h1 className="text-2xl">{status === "SUBMITTED" ? "Submission received" : status === "EXPIRED" ? "Time is up" : "Attempt closed"}</h1></CardTitle><CardDescription>{initial.title}</CardDescription></CardHeader><CardContent className="space-y-3">
@@ -205,6 +209,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
             {chosen.length > 0 && <Button variant="ghost" disabled={submitting} onClick={() => choose(question.id, [])}>Clear answer</Button>}
           </div>
         </CardContent></Card>
+        {away.awaySeconds !== null && <Alert role="status"><AlertTitle>You left the assessment page</AlertTitle><AlertDescription className="space-y-2"><p>You were away for about {away.awaySeconds} second{away.awaySeconds === 1 ? "" : "s"}. Your time kept running, and this has been recorded for your instructor to review. It does not change your score.</p><Button size="sm" variant="outline" onClick={away.dismiss}>OK</Button></AlertDescription></Alert>}
         {notice && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
       </div>
 
