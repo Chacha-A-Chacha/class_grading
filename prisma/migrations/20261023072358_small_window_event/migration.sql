@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "EventKind" ADD VALUE 'SMALL_WINDOW';

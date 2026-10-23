@@ -58,6 +58,7 @@ enum EventKind {
   SAVE_ERROR
   CONNECTION_GAP
   TAKEOVER
+  SMALL_WINDOW
 }
 
 enum ReviewStatus {

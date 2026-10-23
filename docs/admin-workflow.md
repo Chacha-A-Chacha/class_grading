@@ -6,7 +6,9 @@ Status: implementation plan, 13 October 2026; updated 20 October 2026. Slice 1
 implemented, and students can take published assessments (start, save, submit,
 expiry). Slice 4's live monitoring, attempt review, extensions, voids and retests are
 implemented. Assessments on rules version 2 record away periods (page hidden or
-unfocused, with device type) and show them in the attempt timeline; review-case
+unfocused) and, on computers, periods with the window smaller than the screen, with
+device type and multi-screen use where the browser reports it. Students are warned
+before leaving, while away (tab title) and on return; the attempt timeline shows them; review-case
 dispositions and late evidence are not built. Profile/email correction for
 conflicting rows, audited schedule changes after publication and results (slice 5)
 are not built yet.

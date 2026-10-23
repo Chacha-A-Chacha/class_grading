@@ -22,7 +22,7 @@ async function main() {
     // held while an open review case still needs them (specification §11).
     const awayEvents = await db.$executeRaw`
       DELETE FROM "AttemptEvent" e USING "Attempt" a, "Assessment" s
-      WHERE e."attemptId" = a.id AND s.id = a."assessmentId" AND e.kind = 'AWAY'
+      WHERE e."attemptId" = a.id AND s.id = a."assessmentId" AND e.kind IN ('AWAY', 'SMALL_WINDOW')
         AND s."releasedAt" < clock_timestamp() - interval '90 days'
         AND NOT EXISTS (SELECT 1 FROM "ReviewCase" r WHERE r."attemptId" = a.id AND r.status = 'OPEN')`;
     // Keep sessions linked to attempt history or takeover challenges as review evidence.

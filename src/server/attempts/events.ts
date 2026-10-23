@@ -6,9 +6,9 @@ import { AppError } from "../errors";
 const LATE_REPORT_MINUTES = 10;
 
 /**
- * Records client-observed away periods for review (specification §6). Observation only:
- * nothing here reads or changes answers, scores or attempt state, and no lock is taken,
- * so saves are never delayed by monitoring traffic.
+ * Records client-observed page activity for review (specification §6): away periods and
+ * periods with the window smaller than the screen. Observation only: nothing here reads or
+ * changes answers, scores or attempt state, and no lock is taken, so saves are never delayed.
  */
 export async function recordAwayEvents(db: PrismaClient, userId: string, attemptId: string, events: AwayEvent[]) {
   const [attempt] = await db.$queryRaw<{ status: string; currentGeneration: number; rulesVersion: string; active: boolean; open: boolean; events: number }[]>`
@@ -24,24 +24,26 @@ export async function recordAwayEvents(db: PrismaClient, userId: string, attempt
   for (const e of events) {
     // A superseded tab is read-only; its observations would describe the wrong window.
     if (!attempt.open || e.sessionGeneration !== attempt.currentGeneration) { ignored++; continue; }
-    const metadata = JSON.stringify({ reasons: e.reasons, device: e.device, sessionGeneration: e.sessionGeneration });
-    // First report creates the interval; a later one may only add the end, once. Start is immutable.
+    // Kind-specific detail travels with every report; the end report may refine it.
+    const detail = e.kind === "AWAY" ? { reasons: e.reasons } : { size: e.size };
+    const metadata = JSON.stringify({ ...detail, device: e.device, sessionGeneration: e.sessionGeneration });
     const end = e.endedAt ? new Date(e.endedAt) : null;
-    // New intervals only while answering; afterwards an open one may still be closed.
+    // First report creates the interval; a later one may only add the end, once, for the same
+    // kind. The start is immutable. New intervals only while answering; afterwards an open one may close.
     const rows = attempt.active && room > 0
       ? await db.$queryRaw<{ inserted: boolean }[]>`
           INSERT INTO "AttemptEvent" ("attemptId", "clientEventId", kind, "clientOccurredAt", "clientEndedAt", metadata)
-          VALUES (${attemptId}::uuid, ${e.clientEventId}::uuid, 'AWAY', ${new Date(e.startedAt)}, ${end}, ${metadata}::jsonb)
+          VALUES (${attemptId}::uuid, ${e.clientEventId}::uuid, ${e.kind}::"EventKind", ${new Date(e.startedAt)}, ${end}, ${metadata}::jsonb)
           ON CONFLICT ("attemptId", "clientEventId") DO UPDATE
             SET "clientEndedAt" = EXCLUDED."clientEndedAt",
-                metadata = "AttemptEvent".metadata || jsonb_build_object('reasons', EXCLUDED.metadata->'reasons', 'endReceivedAt', clock_timestamp())
+                metadata = "AttemptEvent".metadata || ${JSON.stringify(detail)}::jsonb || jsonb_build_object('endReceivedAt', clock_timestamp())
             WHERE "AttemptEvent"."clientEndedAt" IS NULL AND EXCLUDED."clientEndedAt" IS NOT NULL
-              AND EXCLUDED."clientEndedAt" >= "AttemptEvent"."clientOccurredAt" AND "AttemptEvent".kind = 'AWAY'
+              AND EXCLUDED."clientEndedAt" >= "AttemptEvent"."clientOccurredAt" AND "AttemptEvent".kind = EXCLUDED.kind
           RETURNING (xmax = 0) AS inserted`
       : await db.$queryRaw<{ inserted: boolean }[]>`
           UPDATE "AttemptEvent" SET "clientEndedAt" = ${end},
-                 metadata = metadata || jsonb_build_object('reasons', ${JSON.stringify(e.reasons)}::jsonb, 'endReceivedAt', clock_timestamp())
-          WHERE "attemptId" = ${attemptId}::uuid AND "clientEventId" = ${e.clientEventId}::uuid AND kind = 'AWAY'
+                 metadata = metadata || ${JSON.stringify(detail)}::jsonb || jsonb_build_object('endReceivedAt', clock_timestamp())
+          WHERE "attemptId" = ${attemptId}::uuid AND "clientEventId" = ${e.clientEventId}::uuid AND kind = ${e.kind}::"EventKind"
             AND "clientEndedAt" IS NULL AND ${end}::timestamptz IS NOT NULL AND ${end}::timestamptz >= "clientOccurredAt"
           RETURNING false AS inserted`;
     if (!rows.length) { ignored++; continue; }

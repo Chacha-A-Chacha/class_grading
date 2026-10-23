@@ -26,10 +26,11 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
   const timeline = [
     ...a.questions.flatMap((q) => q.mutations.map((m) => ({ at: m.acceptedAt, key: m.id, text: `Question ${q.setItem.position}: ${m.selectedOptionId ? `chose ${letter(q, m.selectedOptionId)}` : m.selectedOptionIds.length ? `chose ${m.selectedOptionIds.map((id) => letter(q, id)).sort().join(", ")}` : "cleared the answer"} (revision ${m.resultRevision})`, source: "Answer accepted by the server" }))),
     ...a.away.map((e) => {
-      const m = (e.metadata ?? {}) as { reasons?: string[]; device?: { type?: string; os?: string } };
+      const m = (e.metadata ?? {}) as { reasons?: string[]; size?: { width: number; height: number }; device?: { type?: string; os?: string; multipleScreens?: boolean | null } };
       const length = e.clientOccurredAt && e.clientEndedAt ? `${Math.round((e.clientEndedAt.getTime() - e.clientOccurredAt.getTime()) / 1000)} s` : "unknown length (did not return)";
-      const how = m.reasons?.includes("hidden") ? "page hidden" : "window lost focus";
-      return { at: e.clientOccurredAt ?? e.serverReceivedAt, key: e.id, text: `Left the page (${how}), ${length}${m.device?.type ? ` · ${m.device.type}, ${m.device.os}` : ""}`, source: "Student's browser (unverified)" };
+      const what = e.kind === "SMALL_WINDOW" ? `Window smaller than the screen (at most ${m.size?.width ?? "?"}% wide × ${m.size?.height ?? "?"}% high)` : `Left the page (${m.reasons?.includes("hidden") ? "page hidden" : "window lost focus"})`;
+      const device = m.device?.type ? ` · ${m.device.type}, ${m.device.os}${m.device.multipleScreens === true ? ", multiple screens" : m.device.multipleScreens === false ? ", one screen" : ""}` : "";
+      return { at: e.clientOccurredAt ?? e.serverReceivedAt, key: e.id, text: `${what}, ${length}${device}`, source: "Student's browser (unverified)" };
     }),
     ...a.audits.map((x) => ({ at: x.createdAt, key: x.id, text: `${x.action.replaceAll("_", " ").toLowerCase()}: ${x.reason}`, source: "Owner action" })),
     { at: a.startedAt, key: "start", text: `Started on set ${a.set.label}; deadline ${seconds.format(a.expiresAt)}`, source: "Server" },

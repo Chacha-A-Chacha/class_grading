@@ -173,7 +173,8 @@ test("heartbeat records contact and returns server time without changing answers
   await assert.rejects(heartbeat(db, students[0].id, attemptId), (e) => code(e) === "NOT_FOUND");
 });
 
-const away = (patch: Partial<AwayEvent> = {}): AwayEvent => ({ clientEventId: randomUUID(), sessionGeneration: 1, startedAt: new Date(Date.now() - 8000).toISOString(), endedAt: null, reasons: ["blur"], device: { type: "phone", os: "Android" }, ...patch });
+type Away = Extract<AwayEvent, { kind: "AWAY" }>;
+const away = (patch: Partial<Away> = {}): Away => ({ kind: "AWAY", clientEventId: randomUUID(), sessionGeneration: 1, startedAt: new Date(Date.now() - 8000).toISOString(), endedAt: null, reasons: ["blur"], device: { type: "phone", os: "Android", multipleScreens: null }, ...patch });
 
 test("away periods are recorded once, closed once, and never touch the attempt or its answers", async () => {
   const id = await published([students[0].id]);
@@ -184,7 +185,7 @@ test("away periods are recorded once, closed once, and never touch the attempt o
   assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [open]), { recorded: 1, ignored: 0 });
   assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [open]), { recorded: 0, ignored: 1 }, "retried open report is a duplicate");
   const end = new Date(Date.now() - 2000).toISOString();
-  const closed = { ...open, endedAt: end, reasons: ["blur", "hidden"] as AwayEvent["reasons"], startedAt: new Date(Date.now() - 60_000).toISOString() };
+  const closed = { ...open, endedAt: end, reasons: ["blur", "hidden"] as Away["reasons"], startedAt: new Date(Date.now() - 60_000).toISOString() };
   assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [closed]), { recorded: 1, ignored: 0 });
   assert.deepEqual(await recordAwayEvents(db, students[0].id, attemptId, [{ ...closed, endedAt: new Date().toISOString() }]), { recorded: 0, ignored: 1 }, "the end is set only once");
   const [row] = await db.attemptEvent.findMany({ where: { attemptId } });
@@ -192,7 +193,7 @@ test("away periods are recorded once, closed once, and never touch the attempt o
   assert.equal(row.clientOccurredAt!.toISOString(), open.startedAt, "start time is immutable");
   assert.equal(row.clientEndedAt!.toISOString(), end);
   assert.deepEqual((row.metadata as { reasons: string[] }).reasons, ["blur", "hidden"]);
-  assert.deepEqual((row.metadata as { device: unknown }).device, { type: "phone", os: "Android" });
+  assert.deepEqual((row.metadata as { device: unknown }).device, { type: "phone", os: "Android", multipleScreens: null });
   const after = await db.attempt.findUniqueOrThrow({ where: { id: attemptId } });
   assert.deepEqual([after.status, after.recordVersion, after.expiresAt.getTime()], [before.status, before.recordVersion, before.expiresAt.getTime()]);
   assert.equal(await db.answerMutation.count({ where: { attemptId } }), 0);
@@ -223,4 +224,22 @@ test("assessments on rules version 1 are never observed", async () => {
   assert.equal((await getAttemptView(db, students[0].id, attemptId)).monitoring, false);
   await assert.rejects(recordAwayEvents(db, students[0].id, attemptId, [away()]), (e) => code(e) === "MONITORING_OFF");
   assert.equal(await db.attemptEvent.count({ where: { attemptId } }), 0);
+});
+
+test("small-window periods are recorded with the smallest size, and kinds never cross", async () => {
+  const id = await published([students[2].id]);
+  const { attemptId } = await start(students[2], id);
+  const device = { type: "computer" as const, os: "Windows" as const, multipleScreens: true };
+  const small = { kind: "SMALL_WINDOW" as const, clientEventId: randomUUID(), sessionGeneration: 1, startedAt: new Date(Date.now() - 30_000).toISOString(), endedAt: null, size: { width: 60, height: 100 }, device };
+  assert.deepEqual(await recordAwayEvents(db, students[2].id, attemptId, [small]), { recorded: 1, ignored: 0 });
+  // An away report reusing the id cannot close or relabel the small-window period.
+  assert.deepEqual(await recordAwayEvents(db, students[2].id, attemptId, [away({ clientEventId: small.clientEventId, endedAt: new Date().toISOString() })]), { recorded: 0, ignored: 1 });
+  assert.deepEqual(await recordAwayEvents(db, students[2].id, attemptId, [{ ...small, endedAt: new Date().toISOString(), size: { width: 45, height: 80 } }]), { recorded: 1, ignored: 0 });
+  const row = await db.attemptEvent.findFirstOrThrow({ where: { attemptId } });
+  assert.equal(row.kind, "SMALL_WINDOW");
+  assert.ok(row.clientEndedAt);
+  const m = row.metadata as { size: unknown; device: unknown; reasons?: unknown };
+  assert.deepEqual(m.size, { width: 45, height: 80 });
+  assert.deepEqual(m.device, device);
+  assert.equal(m.reasons, undefined);
 });
