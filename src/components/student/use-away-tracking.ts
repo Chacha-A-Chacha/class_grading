@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AWAY_NOTICE_MS, type AwayEvent, type AwayInterval, type DeviceInfo, RESIZE_SETTLE_MS, type SmallInterval, type WindowSize, nextAway, nextSmall, windowShare } from "@/shared/monitoring";
 
 type NavigatorWithHints = Navigator & { userAgentData?: { mobile?: boolean; platform?: string } };
-const RETURN_TITLE = "⚠ Return to your assessment";
+const RETURN_TITLE = "Return to your assessment";
 
 /** Coarse device class and OS only: enough for a reviewer to read phone app switches fairly. */
 function deviceInfo(): DeviceInfo {

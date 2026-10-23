@@ -197,7 +197,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="min-w-0 space-y-4">
         <h1 className="text-xl font-semibold">{initial.title}</h1>
-        {away.smallWindow && <Alert role="status" variant="destructive"><AlertTitle>Maximise this window</AlertTitle><AlertDescription>This window covers about {away.smallWindow.width}% of your screen&apos;s width and {away.smallWindow.height}% of its height. While it is smaller than your screen, this is recorded for your instructor to review. Maximise the window to continue normally.</AlertDescription></Alert>}
+        {away.smallWindow && <Alert role="status"><AlertTitle>Window not maximised</AlertTitle><AlertDescription>The window is about {away.smallWindow.width}% of the screen width and {away.smallWindow.height}% of its height. This is recorded until you maximise it.</AlertDescription></Alert>}
         <Card><CardHeader><div className="flex flex-wrap items-center gap-2"><CardTitle><h2>Question {index + 1} of {total}</h2></CardTitle>{multipleChoice && <Badge variant="secondary">Select all that apply</Badge>}{marked[question.id] && <Badge variant="outline"><Flag aria-hidden="true" />Marked for review</Badge>}</div></CardHeader><CardContent className="space-y-5">
           <p className="whitespace-pre-wrap leading-relaxed">{question.prompt}</p>
           {question.code && <div className="space-y-2">{question.runtimeContext && <p className="text-sm text-muted-foreground">Context: {question.runtimeContext}</p>}<CodeBlock code={question.code} language={question.language} /></div>}
@@ -213,7 +213,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
             {chosen.length > 0 && <Button variant="ghost" disabled={submitting} onClick={() => choose(question.id, [])}>Clear answer</Button>}
           </div>
         </CardContent></Card>
-        {away.awaySeconds !== null && <Alert role="alert" variant="destructive"><AlertTitle>You left the assessment page</AlertTitle><AlertDescription className="space-y-2"><p>You were away for about {away.awaySeconds} second{away.awaySeconds === 1 ? "" : "s"}. This has been recorded for your instructor to review. Stay on this page until you submit; your time keeps running while you are away.</p><Button size="sm" variant="outline" onClick={away.dismiss}>I understand</Button></AlertDescription></Alert>}
+        {away.awaySeconds !== null && <Alert role="status"><AlertTitle>You left this page</AlertTitle><AlertDescription className="space-y-2"><p>You were away for about {away.awaySeconds} second{away.awaySeconds === 1 ? "" : "s"}. This is recorded. The timer kept running.</p><Button size="sm" variant="outline" onClick={away.dismiss}>OK</Button></AlertDescription></Alert>}
         {notice && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
       </div>
 
