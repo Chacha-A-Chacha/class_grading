@@ -120,6 +120,8 @@ export async function attemptDetail(db: PrismaClient, attemptId: string) {
   } });
   if (!attempt) return null;
   const audits = await db.auditLog.findMany({ where: { OR: [{ targetType: "Attempt", targetId: attemptId }, { targetType: "AssessmentAssignment", targetId: attempt.assignmentId }] }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, action: true, reason: true, createdAt: true } });
-  return { ...attempt, audits };
+  // Client-reported observations; times come from the student's device and are unverified.
+  const away = await db.attemptEvent.findMany({ where: { attemptId, kind: "AWAY" }, orderBy: [{ serverReceivedAt: "asc" }, { id: "asc" }], select: { id: true, clientOccurredAt: true, clientEndedAt: true, serverReceivedAt: true, metadata: true } });
+  return { ...attempt, audits, away };
 }
 export type AttemptDetail = NonNullable<Awaited<ReturnType<typeof attemptDetail>>>;

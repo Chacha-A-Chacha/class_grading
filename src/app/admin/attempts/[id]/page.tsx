@@ -25,6 +25,12 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
   const letter = (q: (typeof a.questions)[number], optionId: string | null | undefined) => optionId ? LETTERS[q.options.findIndex((o) => o.option.id === optionId)] ?? "?" : null;
   const timeline = [
     ...a.questions.flatMap((q) => q.mutations.map((m) => ({ at: m.acceptedAt, key: m.id, text: `Question ${q.setItem.position}: ${m.selectedOptionId ? `chose ${letter(q, m.selectedOptionId)}` : m.selectedOptionIds.length ? `chose ${m.selectedOptionIds.map((id) => letter(q, id)).sort().join(", ")}` : "cleared the answer"} (revision ${m.resultRevision})`, source: "Answer accepted by the server" }))),
+    ...a.away.map((e) => {
+      const m = (e.metadata ?? {}) as { reasons?: string[]; device?: { type?: string; os?: string } };
+      const length = e.clientOccurredAt && e.clientEndedAt ? `${Math.round((e.clientEndedAt.getTime() - e.clientOccurredAt.getTime()) / 1000)} s` : "unknown length (did not return)";
+      const how = m.reasons?.includes("hidden") ? "page hidden" : "window lost focus";
+      return { at: e.clientOccurredAt ?? e.serverReceivedAt, key: e.id, text: `Left the page (${how}), ${length}${m.device?.type ? ` · ${m.device.type}, ${m.device.os}` : ""}`, source: "Student's browser (unverified)" };
+    }),
     ...a.audits.map((x) => ({ at: x.createdAt, key: x.id, text: `${x.action.replaceAll("_", " ").toLowerCase()}: ${x.reason}`, source: "Owner action" })),
     { at: a.startedAt, key: "start", text: `Started on set ${a.set.label}; deadline ${seconds.format(a.expiresAt)}`, source: "Server" },
     ...(a.terminalAt ? [{ at: a.terminalAt, key: "end", text: STATUS[a.status], source: "Server" }] : []),
