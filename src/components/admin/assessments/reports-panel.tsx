@@ -17,7 +17,7 @@ function Distribution({ bands, total }: { bands: Report["bands"]; total: number 
       {bands.map((b) => <div key={b.from} className="group relative flex h-full flex-1 flex-col items-center justify-end outline-none" tabIndex={0} aria-label={`${b.from}–${b.to}%: ${b.count} student${b.count === 1 ? "" : "s"}`}>
         {/* Selective direct label: only the tallest band carries its value. */}
         {b === top && b.count > 0 && <span className="mb-1 text-xs text-muted-foreground">{b.count}</span>}
-        <div className="w-full max-w-6 rounded-t-[4px] bg-chart-4 dark:bg-chart-3" style={{ height: `${(b.count / max) * 100}%`, minHeight: b.count ? 2 : 0 }} />
+        <div className="w-full max-w-6 rounded-t-[4px] bg-chart-4 dark:bg-chart-3" style={{ height: `${Math.round((b.count / max) * 1000) / 10}%`, minHeight: b.count ? 2 : 0 }} />
         <div className="pointer-events-none absolute bottom-full z-10 mb-2 hidden whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm group-hover:block group-focus-visible:block">{b.from}–{b.to}%: {b.count} student{b.count === 1 ? "" : "s"}</div>
       </div>)}
     </div>
