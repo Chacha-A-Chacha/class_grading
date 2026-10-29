@@ -15,7 +15,7 @@ import { detailsSchema, toNairobiInput } from "../../src/shared/assessments";
 import type { Mutation } from "../../src/shared/attempts";
 import { activateDraft, createQuestion } from "../../src/server/questions/service";
 import { createAssessment, generateAssessmentSets, publishAssessment, saveBlueprint, setAudience } from "../../src/server/assessments/service";
-import { expireOverdue, getAttemptView, heartbeat, saveAnswers, startAttempt, submitAttempt } from "../../src/server/attempts/service";
+import { expireOverdue, getAttemptView, heartbeat, requestTakeoverCode, saveAnswers, startAttempt, submitAttempt, takeOver } from "../../src/server/attempts/service";
 import { recordAwayEvents } from "../../src/server/attempts/events";
 import type { AwayEvent } from "../../src/shared/monitoring";
 
@@ -242,4 +242,39 @@ test("small-window periods are recorded with the smallest size, and kinds never 
   assert.deepEqual(m.size, { width: 45, height: 80 });
   assert.deepEqual(m.device, device);
   assert.equal(m.reasons, undefined);
+});
+
+test("A06/A18: only the owning session writes; another device takes over with a browser-bound code", async () => {
+  const id = await published([students[1].id]);
+  const s = students[1];
+  const { attemptId } = await start(s, id);
+  const view = await getAttemptView(db, s.id, attemptId, s.session);
+  assert.equal(view.owner, true);
+  const q = view.questions[0].id, option = view.questions[0].options[0].id;
+  const other = (await db.session.create({ data: { userId: s.id, tokenHash: hash(token()), expiresAt: new Date(Date.now() + 3600_000) } })).id;
+  assert.equal((await getAttemptView(db, s.id, attemptId, other)).owner, false, "the other device sees a read-only view");
+  await assert.rejects(saveAnswers(db, s.id, attemptId, [mutation(q, option, 1)], other), (e) => code(e) === "TAKEOVER_REQUIRED");
+  await saveAnswers(db, s.id, attemptId, [mutation(q, option, 1)], s.session);
+  await assert.rejects(takeOver(db, s.id, other, attemptId, "browser-2"), (e) => code(e) === "CODE_REQUIRED");
+  const delivery = await requestTakeoverCode(db, s.id, other, attemptId, "browser-2");
+  assert.ok(delivery);
+  assert.equal(await requestTakeoverCode(db, s.id, other, attemptId, "browser-2"), null, "30-second resend cooldown");
+  const wrong = delivery.code === "000000" ? "111111" : "000000";
+  await assert.rejects(takeOver(db, s.id, other, attemptId, "browser-2", wrong), (e) => code(e) === "INVALID_CODE");
+  assert.equal((await db.emailLoginChallenge.findUniqueOrThrow({ where: { id: delivery.challengeId } })).failedAttempts, 1, "the wrong guess is counted");
+  await assert.rejects(takeOver(db, s.id, other, attemptId, "browser-3", delivery.code), (e) => code(e) === "INVALID_CODE", "code is bound to the requesting browser");
+  const taken = await takeOver(db, s.id, other, attemptId, "browser-2", delivery.code);
+  assert.equal(taken.generation, 2);
+  const challenge = await db.emailLoginChallenge.findUniqueOrThrow({ where: { id: delivery.challengeId } });
+  assert.ok(challenge.consumedAt && challenge.grantConsumedAt, "verification and grant are single-use");
+  // The first device is now locked out; the new one writes with the new generation.
+  await assert.rejects(saveAnswers(db, s.id, attemptId, [mutation(q, null, 2)], s.session), (e) => code(e) === "TAKEOVER_REQUIRED");
+  await saveAnswers(db, s.id, attemptId, [{ ...mutation(q, null, 1), sessionGeneration: 2 }], other);
+  // Another tab in the owning browser takes over by confirming; stale writers then fail.
+  assert.equal((await takeOver(db, s.id, other, attemptId, "browser-2")).generation, 3);
+  await assert.rejects(saveAnswers(db, s.id, attemptId, [{ ...mutation(q, option, 2), sessionGeneration: 2 }], other), (e) => code(e) === "STALE_SESSION");
+  const events = await db.attemptEvent.findMany({ where: { attemptId, kind: "TAKEOVER" }, orderBy: { serverReceivedAt: "asc" } });
+  assert.deepEqual(events.map((e) => (e.metadata as { method: string }).method), ["code", "confirm"]);
+  await submitAttempt(db, s.id, attemptId, randomUUID(), [], other);
+  await assert.rejects(takeOver(db, s.id, s.session, attemptId, "browser-1"), (e) => code(e) === "ATTEMPT_CLOSED");
 });

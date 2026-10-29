@@ -36,6 +36,8 @@ export type AttemptView = AttemptState & {
   rules: { instructions: string; permittedMaterials: string };
   /** Rules version 2+: the student was told that leaving the page is recorded. */
   monitoring: boolean;
+  /** False when another browser or device holds the attempt: this view is read-only until a takeover. */
+  owner: boolean;
   submittedAt: string | null;
   questions: {
     id: string; position: number; kind: "CODE" | "THEORY"; answerMode: "SINGLE" | "MULTIPLE"; prompt: string; code: string | null; language: string | null; runtimeContext: string | null; markedForReview: boolean;

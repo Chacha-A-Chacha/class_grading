@@ -9,5 +9,5 @@ export const POST = endpoint(async (request, context: RouteContext<"/api/v1/atte
   const session = await requireStudent();
   const id = z.string().uuid().parse((await context.params).id);
   const { submissionId, mutations } = z.object({ submissionId: z.string().uuid(), mutations: mutationsSchema.default([]) }).parse(await bodyJson(request));
-  return json(await submitAttempt(getDatabase(), session.userId, id, submissionId, mutations));
+  return json(await submitAttempt(getDatabase(), session.userId, id, submissionId, mutations, session.id));
 });

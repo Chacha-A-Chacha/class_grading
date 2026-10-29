@@ -14,3 +14,8 @@ export async function deliverCode(email: string, code: string): Promise<string> 
   const info = await mailTransport().sendMail({ from: process.env.MAIL_FROM, to: email, subject: `Your ${BRAND.name} sign-in code`, text: `Your sign-in code is ${code}. It expires two minutes after it was requested. Enter it in the browser where you requested it. Do not share this code. If you did not request it, ignore this email.` });
   return typeof info.response === "string" ? info.response : "";
 }
+/** Code for continuing an attempt on another device; separate wording so it is never mistaken for sign-in. */
+export async function deliverTakeoverCode(email: string, code: string): Promise<string> {
+  const info = await mailTransport().sendMail({ from: process.env.MAIL_FROM, to: email, subject: `Your ${BRAND.name} code to continue your assessment`, text: `Your code is ${code}. Enter it on the device where you want to continue your assessment. It expires two minutes after it was requested. Your assessment will stop saving on the other device. If you did not request this, tell your instructor.` });
+  return typeof info.response === "string" ? info.response : "";
+}

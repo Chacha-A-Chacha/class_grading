@@ -10,9 +10,10 @@ const LATE_REPORT_MINUTES = 10;
  * periods with the window smaller than the screen. Observation only: nothing here reads or
  * changes answers, scores or attempt state, and no lock is taken, so saves are never delayed.
  */
-export async function recordAwayEvents(db: PrismaClient, userId: string, attemptId: string, events: AwayEvent[]) {
-  const [attempt] = await db.$queryRaw<{ status: string; currentGeneration: number; rulesVersion: string; active: boolean; open: boolean; events: number }[]>`
+export async function recordAwayEvents(db: PrismaClient, userId: string, attemptId: string, events: AwayEvent[], writer?: string) {
+  const [attempt] = await db.$queryRaw<{ status: string; currentGeneration: number; rulesVersion: string; active: boolean; open: boolean; events: number; owner: string | null }[]>`
     SELECT a.status::text AS status, a."currentGeneration", a."rulesVersion",
+           (SELECT g."userSessionId" FROM "AttemptSession" g WHERE g."attemptId" = a.id AND g.generation = a."currentGeneration") AS owner,
            (a.status = 'ACTIVE' AND a."expiresAt" > clock_timestamp()) AS active,
            (a.status = 'ACTIVE' OR a."terminalAt" > clock_timestamp() - make_interval(mins => ${LATE_REPORT_MINUTES})) AS open,
            (SELECT count(*)::int FROM "AttemptEvent" e WHERE e."attemptId" = a.id) AS events
@@ -23,7 +24,7 @@ export async function recordAwayEvents(db: PrismaClient, userId: string, attempt
   let recorded = 0, ignored = 0, room = MAX_EVENTS_PER_ATTEMPT - attempt.events;
   for (const e of events) {
     // A superseded tab is read-only; its observations would describe the wrong window.
-    if (!attempt.open || e.sessionGeneration !== attempt.currentGeneration) { ignored++; continue; }
+    if (!attempt.open || e.sessionGeneration !== attempt.currentGeneration || (writer !== undefined && attempt.owner !== writer)) { ignored++; continue; }
     // Kind-specific detail travels with every report; the end report may refine it.
     const detail = e.kind === "AWAY" ? { reasons: e.reasons } : { size: e.size };
     const metadata = JSON.stringify({ ...detail, device: e.device, sessionGeneration: e.sessionGeneration });

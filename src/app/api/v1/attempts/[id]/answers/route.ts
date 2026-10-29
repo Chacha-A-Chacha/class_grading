@@ -9,5 +9,5 @@ export const PUT = endpoint(async (request, context: RouteContext<"/api/v1/attem
   const session = await requireStudent();
   const id = z.string().uuid().parse((await context.params).id);
   const { mutations } = z.object({ mutations: mutationsSchema.min(1) }).parse(await bodyJson(request));
-  return json(await saveAnswers(getDatabase(), session.userId, id, mutations));
+  return json(await saveAnswers(getDatabase(), session.userId, id, mutations, session.id));
 });

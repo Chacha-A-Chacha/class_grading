@@ -1,7 +1,8 @@
-import { createHash, randomInt } from "node:crypto";
+import { createHash, randomInt, randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "../../generated/prisma/client";
 import { type AttemptState, type AttemptView, type Mutation, type MutationReceipt, type SubmitResult, normalizeSelection } from "../../shared/attempts";
-import { now } from "../auth/service";
+import { consume, now } from "../auth/service";
+import { equal, hash, token, verifier } from "../auth/crypto";
 import { AppError } from "../errors";
 import { withRetry } from "../retry";
 import { monitorsFocus } from "../../shared/monitoring";
@@ -30,6 +31,18 @@ async function resolveOverdue(tx: Tx, attempt: Locked, time: Date) {
   await tx.attempt.update({ where: { id: attempt.id }, data: { status: "EXPIRED", terminalAt: time, recordVersion: { increment: 1 } } });
   await scoreAttempt(tx, attempt.id);
   return { ...attempt, status: "EXPIRED" as const };
+}
+
+/**
+ * Only the browser session that owns the attempt's current generation may write (A06). A
+ * second device must take over first; `writer` is the requesting session, and internal
+ * callers that write nothing (expiry resolution) omit it.
+ */
+async function assertWriter(tx: Tx, attempt: Locked, writer: string | undefined) {
+  if (writer === undefined) return;
+  const [owner] = await tx.$queryRaw<{ userSessionId: string | null }[]>`
+    SELECT "userSessionId" FROM "AttemptSession" WHERE "attemptId" = ${attempt.id}::uuid AND generation = ${attempt.currentGeneration}`;
+  if (!owner || owner.userSessionId !== writer) throw new AppError("TAKEOVER_REQUIRED", "This attempt is open in another browser or device. Take over here to continue.", 409);
 }
 
 /**
@@ -168,20 +181,22 @@ async function applyMutations(tx: Tx, attempt: Locked, time: Date, input: Mutati
   return receipts;
 }
 
-export async function saveAnswers(db: PrismaClient, userId: string, attemptId: string, mutations: Mutation[]) {
+export async function saveAnswers(db: PrismaClient, userId: string, attemptId: string, mutations: Mutation[], writer?: string) {
   return withRetry(() => db.$transaction(async (tx) => {
     const { attempt: locked, time } = await lockOwned(tx, attemptId, userId);
     const attempt = await resolveOverdue(tx, locked, time);
+    if (attempt.status === "ACTIVE" && mutations.length) await assertWriter(tx, attempt, writer);
     if (attempt.status !== "ACTIVE") return { ...state(attempt, time), receipts: [] as MutationReceipt[], closed: true };
     return { ...state(attempt, time), receipts: await applyMutations(tx, attempt, time, mutations), closed: false };
   }));
 }
 
 /** Saves remaining changes and submits in one transaction if the deadline has not passed. */
-export async function submitAttempt(db: PrismaClient, userId: string, attemptId: string, submissionId: string, mutations: Mutation[]): Promise<SubmitResult> {
+export async function submitAttempt(db: PrismaClient, userId: string, attemptId: string, submissionId: string, mutations: Mutation[], writer?: string): Promise<SubmitResult> {
   return withRetry(() => db.$transaction(async (tx) => {
     const { attempt: locked, time } = await lockOwned(tx, attemptId, userId);
     const attempt = await resolveOverdue(tx, locked, time);
+    if (attempt.status === "ACTIVE") await assertWriter(tx, attempt, writer);
     let receipts: MutationReceipt[] = [];
     let result = attempt;
     if (attempt.status === "ACTIVE") {
@@ -196,11 +211,12 @@ export async function submitAttempt(db: PrismaClient, userId: string, attemptId:
   }));
 }
 
-export async function setMarkedForReview(db: PrismaClient, userId: string, attemptId: string, attemptQuestionId: string, marked: boolean) {
+export async function setMarkedForReview(db: PrismaClient, userId: string, attemptId: string, attemptQuestionId: string, marked: boolean, writer?: string) {
   return db.$transaction(async (tx) => {
     const { attempt: locked, time } = await lockOwned(tx, attemptId, userId);
     const attempt = await resolveOverdue(tx, locked, time);
     if (attempt.status !== "ACTIVE") return state(attempt, time);
+    await assertWriter(tx, attempt, writer);
     const { count } = await tx.attemptQuestion.updateMany({ where: { id: attemptQuestionId, attemptId }, data: { markedForReview: marked } });
     if (!count) throw new AppError("INVALID_QUESTION", "That question is not part of this attempt.", 422);
     return state(attempt, time);
@@ -223,10 +239,12 @@ export async function heartbeat(db: PrismaClient, userId: string, attemptId: str
   return { status: row.status, expiresAt: row.expiresAt.toISOString(), serverNow: row.now.toISOString(), generation: row.currentGeneration };
 }
 
-export async function getAttemptView(db: PrismaClient, userId: string, attemptId: string): Promise<AttemptView> {
+export async function getAttemptView(db: PrismaClient, userId: string, attemptId: string, viewer?: string): Promise<AttemptView> {
   const resolved = await withRetry(() => db.$transaction(async (tx) => {
     const { attempt, time } = await lockOwned(tx, attemptId, userId);
-    return { attempt: await resolveOverdue(tx, attempt, time), time };
+    const resolvedAttempt = await resolveOverdue(tx, attempt, time);
+    const [owner] = await tx.$queryRaw<{ userSessionId: string | null }[]>`SELECT "userSessionId" FROM "AttemptSession" WHERE "attemptId" = ${attemptId}::uuid AND generation = ${attempt.currentGeneration}`;
+    return { attempt: resolvedAttempt, time, owner: viewer === undefined || owner?.userSessionId === viewer };
   }));
   const a = await db.attempt.findUniqueOrThrow({ where: { id: attemptId }, select: {
     rulesSnapshot: true, rulesVersion: true, submittedAt: true, assignment: { select: { assessment: { select: { title: true } } } },
@@ -241,6 +259,7 @@ export async function getAttemptView(db: PrismaClient, userId: string, attemptId
     ...state(resolved.attempt, resolved.time), attemptId, title: a.assignment.assessment.title, submittedAt: a.submittedAt?.toISOString() ?? null,
     rules: { instructions: rules.instructions ?? "", permittedMaterials: rules.permittedMaterials ?? "" },
     monitoring: monitorsFocus(a.rulesVersion),
+    owner: resolved.owner,
     questions: a.questions.map((q) => ({ id: q.id, position: q.setItem.position, ...q.setItem.questionVersion, markedForReview: q.markedForReview, answer: q.answer, options: q.options.map((o) => o.option) })),
   };
 }
@@ -269,4 +288,66 @@ export async function studentAssessments(db: PrismaClient, userId: string) {
       assessment: { select: { id: true, title: true, rulesVersion: true, rulesSnapshot: true, releasedAt: true } },
       attempts: { orderBy: { attemptNumber: "desc" }, select: { id: true, status: true, expiresAt: true, submittedAt: true } } },
   });
+}
+
+/**
+ * Starts a device takeover (specification §6): a fresh code to the student's email, bound to
+ * the requesting browser, session and target attempt. Null means nothing is sent (the
+ * resend cooldown); limits and closed attempts are reported as errors.
+ */
+export async function requestTakeoverCode(db: PrismaClient, userId: string, userSessionId: string, attemptId: string, browser: string) {
+  const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+  if (!await consume(db, [{ scope: "takeover-browser", subject: hash(browser), limit: 10 }, { scope: "takeover-email", subject: verifier("email", user.email), limit: 5 }])) throw new AppError("RATE_LIMITED", "Too many codes requested. Wait 15 minutes or contact your instructor.", 429);
+  return db.$transaction(async (tx) => {
+    const { attempt: locked, time } = await lockOwned(tx, attemptId, userId);
+    const attempt = await resolveOverdue(tx, locked, time);
+    if (attempt.status !== "ACTIVE") throw new AppError("ATTEMPT_CLOSED", "This attempt has ended.", 409);
+    const recent = await tx.emailLoginChallenge.findFirst({ where: { userId, purpose: "TAKEOVER", targetAttemptId: attemptId }, orderBy: { issuedAt: "desc" } });
+    if (recent && recent.resendAvailableAt > time && !recent.consumedAt && !recent.invalidatedAt) return null;
+    await tx.emailLoginChallenge.updateMany({ where: { userId, purpose: "TAKEOVER", consumedAt: null, invalidatedAt: null }, data: { invalidatedAt: time } });
+    const id = randomUUID(), code = randomInt(0, 1_000_000).toString().padStart(6, "0");
+    await tx.emailLoginChallenge.create({ data: { id, userId, purpose: "TAKEOVER", codeVerifier: verifier(id, code), browserBindingHash: hash(browser), targetAttemptId: attemptId, requestingSessionId: userSessionId,
+      issuedAt: time, expiresAt: new Date(time.getTime() + 120_000), resendAvailableAt: new Date(time.getTime() + 30_000) } });
+    return { userId, email: user.email, code, challengeId: id };
+  });
+}
+
+/**
+ * Takes an active attempt over in this session (specification §6): explicit confirmation in the
+ * browser that already owns it (another tab), or a fresh email code from another device.
+ * Rotates the session generation atomically, so earlier writers fail immediately.
+ */
+export async function takeOver(db: PrismaClient, userId: string, userSessionId: string, attemptId: string, browser: string, code?: string): Promise<AttemptState> {
+  if (code && !await consume(db, [{ scope: "takeover-verify", subject: hash(browser), limit: 30 }])) throw new AppError("RATE_LIMITED", "Too many attempts. Wait 15 minutes or contact your instructor.", 429);
+  const outcome = await withRetry(() => db.$transaction(async (tx) => {
+    const { attempt: locked, time } = await lockOwned(tx, attemptId, userId);
+    const attempt = await resolveOverdue(tx, locked, time);
+    if (attempt.status !== "ACTIVE") return { error: "ATTEMPT_CLOSED" as const, attempt, time };
+    const [owner] = await tx.$queryRaw<{ userSessionId: string | null }[]>`SELECT "userSessionId" FROM "AttemptSession" WHERE "attemptId" = ${attemptId}::uuid AND generation = ${attempt.currentGeneration}`;
+    let method: "confirm" | "code" = "confirm";
+    if (owner?.userSessionId !== userSessionId) {
+      if (!code) return { error: "CODE_REQUIRED" as const, attempt, time };
+      const challenge = await tx.emailLoginChallenge.findFirst({ where: { userId, purpose: "TAKEOVER", targetAttemptId: attemptId, requestingSessionId: userSessionId, consumedAt: null, invalidatedAt: null }, orderBy: { issuedAt: "desc" } });
+      if (!challenge || challenge.expiresAt <= time || challenge.failedAttempts >= 5) return { error: "INVALID_CODE" as const, attempt, time };
+      if (!equal(challenge.browserBindingHash, hash(browser)) || !equal(challenge.codeVerifier, verifier(challenge.id, code))) {
+        // Committed before the error is reported, so guesses are counted (five invalidate the code).
+        await tx.emailLoginChallenge.update({ where: { id: challenge.id }, data: { failedAttempts: { increment: 1 }, ...(challenge.failedAttempts === 4 ? { invalidatedAt: time } : {}) } });
+        return { error: "INVALID_CODE" as const, attempt, time };
+      }
+      // Verification issues a single-use grant bound to this session and attempt, consumed by this takeover.
+      await tx.emailLoginChallenge.update({ where: { id: challenge.id }, data: { consumedAt: time, grantHash: hash(token()), grantExpiresAt: new Date(time.getTime() + 120_000), grantConsumedAt: time } });
+      method = "code";
+    }
+    const generation = attempt.currentGeneration + 1;
+    await tx.attempt.update({ where: { id: attemptId }, data: { currentGeneration: generation, recordVersion: { increment: 1 } } });
+    await tx.attemptSession.updateMany({ where: { attemptId, revokedAt: null }, data: { revokedAt: time } });
+    await tx.attemptSession.create({ data: { attemptId, generation, userSessionId } });
+    // Server-observed, unlike page activity: shown in the review timeline (specification §10).
+    await tx.attemptEvent.create({ data: { attemptId, clientEventId: randomUUID(), kind: "TAKEOVER", serverReceivedAt: time, metadata: { fromGeneration: attempt.currentGeneration, toGeneration: generation, method } } });
+    return { error: null, attempt: { ...attempt, currentGeneration: generation }, time };
+  }));
+  if (outcome.error === "ATTEMPT_CLOSED") throw new AppError("ATTEMPT_CLOSED", "This attempt has ended.", 409);
+  if (outcome.error === "CODE_REQUIRED") throw new AppError("CODE_REQUIRED", "This attempt is open on another device. Request a code to continue here.", 409);
+  if (outcome.error === "INVALID_CODE") throw new AppError("INVALID_CODE", "The code is invalid or expired. Request a new code if needed.", 401);
+  return state(outcome.attempt, outcome.time);
 }

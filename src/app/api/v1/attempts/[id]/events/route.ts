@@ -9,5 +9,5 @@ export const POST = endpoint(async (request, context: RouteContext<"/api/v1/atte
   const session = await requireStudent();
   const id = z.string().uuid().parse((await context.params).id);
   const { events } = awayBatchSchema.parse(await bodyJson(request));
-  return json(await recordAwayEvents(getDatabase(), session.userId, id, events));
+  return json(await recordAwayEvents(getDatabase(), session.userId, id, events, session.id));
 });
