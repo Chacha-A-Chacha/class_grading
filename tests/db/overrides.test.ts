@@ -16,6 +16,7 @@ import { activateDraft, createQuestion } from "../../src/server/questions/servic
 import { createAssessment, generateAssessmentSets, publishAssessment, saveBlueprint, setAudience } from "../../src/server/assessments/service";
 import { getAttemptView, saveAnswers, startAttempt, submitAttempt } from "../../src/server/attempts/service";
 import { authorizeRetest, extendAttempt, liveStatus, voidAttempt } from "../../src/server/attempts/admin";
+import { addToPublished, giveNewWindow } from "../../src/server/assessments/assignments";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL explicitly. Tests never default to the application database.");
@@ -126,4 +127,46 @@ test("live status reports each student's latest attempt and progress", async () 
   const row = live.rows.find((r) => r.attempts[0]?.id === attemptId)!;
   assert.deepEqual([row.attempts[0].answered, row.attempts[0].total], [1, 1]);
   assert.equal(live.rows.filter((r) => !r.attempts.length).length, 3);
+});
+
+async function newStudent(disabled = false) {
+  const user = await db.user.create({ data: { email: `${randomUUID()}@example.test`, displayName: "Late joiner", disabledAt: disabled ? new Date() : null } });
+  return { id: user.id, session: (await db.session.create({ data: { userId: user.id, tokenHash: hash(token()), expiresAt: inHours(1) } })).id };
+}
+
+test("students can be added to a published assessment, with a late window once starting has closed", async () => {
+  const id = await published();
+  const [x, y, off] = [await newStudent(), await newStudent(), await newStudent(true)];
+  assert.deepEqual(await addToPublished(db, owner, id, [x.id], "Registered late"), { added: 1 });
+  assert.ok((await start(x, id)).attemptId, "the added student can start in the normal window");
+  await assert.rejects(addToPublished(db, owner, id, [x.id], "Again"), (e) => code(e) === "ALREADY_ASSIGNED");
+  await assert.rejects(addToPublished(db, owner, id, [off.id], "Disabled"), (e) => code(e) === "INVALID_AUDIENCE");
+  // Close the normal start window: a late window is then required.
+  await db.$executeRaw`UPDATE "Assessment" SET "openAt" = ${inHours(-3)}, "latestStartAt" = ${inHours(-2)}, "hardCloseAt" = ${inHours(-1)} WHERE id = ${id}::uuid`;
+  await assert.rejects(addToPublished(db, owner, id, [y.id], "Registered late"), (e) => code(e) === "LATE");
+  await assert.rejects(addToPublished(db, owner, id, [y.id], "Bad window", { latestStartAt: inHours(1), hardCloseAt: inHours(1.1) }), (e) => code(e) === "INVALID_SCHEDULE");
+  await addToPublished(db, owner, id, [y.id], "Registered late", { latestStartAt: inHours(1), hardCloseAt: inHours(2) });
+  assert.ok((await start(y, id)).attemptId, "the late window lets them start");
+  assert.equal(await db.auditLog.count({ where: { action: "ASSESSMENT_ASSIGNMENT_ADDED", metadata: { path: ["assessmentId"], equals: id } } }), 2);
+  await db.$executeRaw`UPDATE "Assessment" SET "releasedAt" = clock_timestamp() WHERE id = ${id}::uuid`;
+  await assert.rejects(addToPublished(db, owner, id, [(await newStudent()).id], "After release", { latestStartAt: inHours(1), hardCloseAt: inHours(2) }), (e) => code(e) === "RELEASED");
+});
+
+test("a missed window gives an unused attempt a new window without granting another attempt", async () => {
+  const id = await published();
+  const s = students[3];
+  const { attemptId } = await start(s, id);
+  await submitAttempt(db, s.id, attemptId, randomUUID(), []);
+  let assignment = await db.assessmentAssignment.findFirstOrThrow({ where: { assessmentId: id, userId: s.id } });
+  await assert.rejects(giveNewWindow(db, owner, assignment.id, assignment.recordVersion, inHours(1), inHours(2), "No attempt left"), (e) => code(e) === "NO_ATTEMPT_LEFT");
+  // A retest whose window the student missed: the attempt stays unused.
+  await authorizeRetest(db, owner, assignment.id, assignment.recordVersion, inHours(0.5), inHours(1), "Retest");
+  assignment = await db.assessmentAssignment.findFirstOrThrow({ where: { id: assignment.id } });
+  await assert.rejects(giveNewWindow(db, owner, assignment.id, assignment.recordVersion, inHours(1), inHours(2), "Still open"), (e) => code(e) === "NO_CHANGE");
+  await db.$executeRaw`UPDATE "AssessmentAssignment" SET "openAt" = ${inHours(-3)}, "latestStartAt" = ${inHours(-2)}, "hardCloseAt" = ${inHours(-1)} WHERE id = ${assignment.id}::uuid`;
+  await assert.rejects(giveNewWindow(db, owner, assignment.id, assignment.recordVersion - 1, inHours(1), inHours(2), "Stale"), (e) => code(e) === "STALE_ASSIGNMENT");
+  await giveNewWindow(db, owner, assignment.id, assignment.recordVersion, inHours(1), inHours(2), "Missed the retest window");
+  const after = await db.assessmentAssignment.findUniqueOrThrow({ where: { id: assignment.id } });
+  assert.equal(after.allowedAttemptCount, 2, "no extra attempt granted");
+  assert.ok((await start(s, id)).attemptId, "the student can start their remaining attempt");
 });

@@ -11,7 +11,7 @@ import { generate, generateSecret } from "otplib";
 import { PrismaClient } from "../../src/generated/prisma/client";
 import { encrypt, hash, token, verifier } from "../../src/server/auth/crypto";
 import { assertAdmin, consume, getSession, issueCode, verifyCode, verifyMfa } from "../../src/server/auth/service";
-import { addStudent, commitImport, createPreview, resetSignInLimits, setStudentStatus } from "../../src/server/students/service";
+import { addStudent, changeStudentEmail, commitImport, correctStudent, createPreview, resetSignInLimits, setStudentStatus } from "../../src/server/students/service";
 import { normalizeRows } from "../../src/shared/students";
 import { failedOutcome, recordDelivery, sentOutcome } from "../../src/server/auth/delivery";
 
@@ -186,4 +186,27 @@ test("sign-in email outcomes are logged without the code or address and outlive 
   assert.deepEqual(rows.map((r) => [r.status, r.durationMs, r.smtpCode, r.errorCode, r.stage]), [["SENT", 640, 250, null, null], ["FAILED", 5012, 550, "EENVELOPE", "RCPT TO"]]);
   for (const row of rows) { assert.ok(!row.detail!.includes(user.email)); assert.ok(!row.detail!.includes(delivery.code)); }
   await assert.rejects(db.$executeRaw`INSERT INTO "EmailDelivery" ("userId", "challengeId", purpose, status, "durationMs") VALUES (${user.id}::uuid, gen_random_uuid(), 'LOGIN', 'SENT', -1)`);
+});
+
+test("student details are corrected with an audit trail; an email change ends sessions and codes", async () => {
+  const user = await student();
+  await correctStudent(db, sessionId, user.id, { displayName: "  Corrected   Name ", admissionNumber: "x-9" }, "Spelling fixed by the student");
+  const fixed = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  assert.deepEqual([fixed.displayName, fixed.admissionNumber], ["Corrected Name", "X-9"]);
+  const entry = await db.auditLog.findFirstOrThrow({ where: { targetId: user.id, action: "STUDENT_DETAILS_CORRECTED" } });
+  assert.deepEqual((entry.metadata as { to: unknown }).to, { displayName: "Corrected Name", admissionNumber: "X-9" });
+  await assert.rejects(correctStudent(db, sessionId, user.id, { displayName: "Corrected Name", admissionNumber: "X-9" }, "No change"), (e) => (e as { code?: string }).code === "NO_CHANGE");
+  const other = await student();
+  await assert.rejects(correctStudent(db, sessionId, other.id, { displayName: "Other", admissionNumber: "X-9" }, "Clashing admission"));
+  // Email: a live session and an open code must not survive the change.
+  await db.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date() } });
+  await db.session.create({ data: { userId: user.id, tokenHash: hash(token()), expiresAt: new Date(Date.now() + 3600_000) } });
+  const { delivery } = await issueCode(db, user.email, token(), "test");
+  assert.ok(delivery);
+  await assert.rejects(changeStudentEmail(db, sessionId, user.id, other.email, "Taken"), (e) => (e as { code?: string }).code === "EMAIL_IN_USE");
+  await changeStudentEmail(db, sessionId, user.id, " New.Address@Example.test ", "Student lost access to the old mailbox");
+  const moved = await db.user.findUniqueOrThrow({ where: { id: user.id } });
+  assert.deepEqual([moved.email, moved.emailVerifiedAt], ["new.address@example.test", null]);
+  assert.equal(await db.session.count({ where: { userId: user.id, revokedAt: null } }), 0);
+  assert.ok((await db.emailLoginChallenge.findUniqueOrThrow({ where: { id: delivery.challengeId } })).invalidatedAt);
 });

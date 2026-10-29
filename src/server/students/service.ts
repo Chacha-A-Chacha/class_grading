@@ -99,3 +99,40 @@ export async function resetSignInLimits(db: PrismaClient, sessionId: string, id:
     return count;
   });
 }
+
+/** Corrects a student's name or admission number (admin workflow §4); audited with the old and new values. */
+export async function correctStudent(db: PrismaClient, sessionId: string, id: string, input: { displayName: string; admissionNumber: string | null }, reason: string) {
+  return db.$transaction(async (tx) => {
+    const admin = await assertAdmin(tx, sessionId);
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${id}::uuid FOR UPDATE`;
+    const student = await tx.user.findUnique({ where: { id } });
+    if (!student || student.isAdmin) throw new AppError("NOT_FOUND", "Student not found.", 404);
+    const next = studentSchema.pick({ displayName: true, admissionNumber: true }).parse({ displayName: input.displayName, admissionNumber: input.admissionNumber ?? "" });
+    if (next.displayName === student.displayName && next.admissionNumber === student.admissionNumber) throw new AppError("NO_CHANGE", "Nothing changed.", 409);
+    await tx.user.update({ where: { id }, data: next });
+    await tx.auditLog.create({ data: { actorId: admin.userId, action: "STUDENT_DETAILS_CORRECTED", targetType: "User", targetId: id, reason,
+      metadata: { from: { displayName: student.displayName, admissionNumber: student.admissionNumber }, to: next } } });
+  });
+}
+
+/**
+ * Changes a student's login email after the owner has checked their identity (specification §3).
+ * Outstanding codes and sessions end, and the new address counts as verified only once the
+ * student signs in with a code sent to it.
+ */
+export async function changeStudentEmail(db: PrismaClient, sessionId: string, id: string, email: string, reason: string) {
+  return db.$transaction(async (tx) => {
+    const admin = await assertAdmin(tx, sessionId);
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${id}::uuid FOR UPDATE`;
+    const student = await tx.user.findUnique({ where: { id } });
+    if (!student || student.isAdmin) throw new AppError("NOT_FOUND", "Student not found.", 404);
+    const next = studentSchema.shape.email.parse(email);
+    if (next === student.email) throw new AppError("NO_CHANGE", "That is already the login email.", 409);
+    if (await tx.user.findUnique({ where: { email: next } })) throw new AppError("EMAIL_IN_USE", "Another account already uses that email.", 409);
+    const time = await now(tx);
+    await tx.user.update({ where: { id }, data: { email: next, emailVerifiedAt: null } });
+    const sessions = await tx.session.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: time } });
+    await tx.emailLoginChallenge.updateMany({ where: { userId: id, consumedAt: null, invalidatedAt: null }, data: { invalidatedAt: time } });
+    await tx.auditLog.create({ data: { actorId: admin.userId, action: "STUDENT_EMAIL_CHANGED", targetType: "User", targetId: id, reason, metadata: { from: student.email, to: next, sessionsEnded: sessions.count } } });
+  });
+}
