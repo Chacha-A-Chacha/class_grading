@@ -87,8 +87,17 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   new schedule; each needs a reason, follows assessment → assignment → attempt lock
   order and is audited.
 
+- **Results and release:** a Results tab per published assessment lists every student
+  (Not started, In progress, Voided and Ungradable stay distinct from zero), with a
+  release checklist (open windows, active attempts, unscored attempts, scoring jobs).
+  Assessments set to release automatically are released by the worker once the
+  barrier is met; held ones wait for the owner. Release locks the assessment row, so
+  starts, retests and extensions cannot race it (A11). Students then see their score,
+  answers, correct answers and explanations on their own result page only (A13); the
+  owner can download a formula-safe CSV at any time. Tests in `tests/db/results.test.ts`.
+
 The device-local recovery queue, takeover and late evidence (milestone 4), incident
-review, results release, readiness
+review, exclusion/rescore, reports, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
 student's name, admission number or login email is not built yet. Liveness only
 proves the application can respond; it does not certify exam readiness.
