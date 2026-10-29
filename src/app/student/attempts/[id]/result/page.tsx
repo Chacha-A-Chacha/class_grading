@@ -31,6 +31,8 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
   return <div className="max-w-3xl space-y-6">
     <div className="space-y-1"><h1 className="text-3xl font-semibold">{result.title}</h1><p className="text-muted-foreground">Attempt {result.attemptNumber} · {result.status === "EXPIRED" ? "time ended" : "submitted"}</p></div>
     <Card><CardHeader><CardTitle><h2>Your score</h2></CardTitle></CardHeader><CardContent className="space-y-2">
+      {result.recalculating && <p className="text-sm">A question is being removed from scoring for everyone. Your score below may change shortly.</p>}
+      {!result.recalculating && score && score.revision > 1 && <p className="text-sm text-muted-foreground">Your score was recalculated after a question was removed from scoring for everyone.</p>}
       {!score ? <p>Your score is not available yet.</p> : score.included === 0 ? <p>This assessment cannot be graded. Your instructor will tell you what happens next.</p> : <>
         <p className="text-3xl font-semibold">{percentText(score.correct, score.included)}</p>
         <p>{score.correct} of {score.included} questions correct. The pass mark is {score.passPercent}%. {score.passed ? "You passed." : "You did not reach the pass mark."}</p>
