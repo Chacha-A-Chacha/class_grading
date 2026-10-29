@@ -129,9 +129,14 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   `LateAnswerEvidence`, apart from the score, and shown in the attempt timeline as not
   scored. Device content expires after seven days. If the browser cannot store data
   the exam says so and relies on server saves.
+- **Reviews:** the owner opens a review from an attempt, or a student asks for one on
+  their own finished attempt (result page or closed-attempt screen). One case is open
+  per attempt; it is resolved as no issue, technical issue, needs follow-up or confirmed
+  policy violation, with a reason, and the reviewer is in the audit log. Outcomes never
+  change a score; voids and retests stay separate actions. A Reviews tab lists cases,
+  open first; open cases are shown, not enforced, in the release checklist.
 
-Incident review (dispositions), readiness checks, backups and load testing remain
-upcoming. Liveness only
+Readiness checks, backups and load testing remain upcoming. Liveness only
 proves the application can respond; it does not certify exam readiness.
 Existing root HTML/CSS files remain historical files, outside Next.js routing.
 See the [performance and load plan](docs/performance.md) before building the

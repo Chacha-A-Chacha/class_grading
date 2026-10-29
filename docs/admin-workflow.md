@@ -8,11 +8,11 @@ expiry). Slice 4's live monitoring, attempt review, extensions, voids and retest
 implemented. Assessments on rules version 2 record away periods (page hidden or
 unfocused) and, on computers, periods with the window smaller than the screen, with
 device type and multi-screen use where the browser reports it. Students are warned
-before leaving, while away (tab title) and on return; the attempt timeline shows them; review-case
-dispositions and late evidence are not built. Result release is built: a Results tab
+before leaving, while away (tab title) and on return; the attempt timeline shows them. Result release is built: a Results tab
 with a release checklist, release now or hold, automatic release by the worker for
 assessments not held, the student result page and CSV export. Reports are built (Reports tab). Second-tab read-only mode, device takeover with an
-email code, the device answer queue and late evidence are built. Name, admission-number and login-email corrections,
+email code, the device answer queue, late evidence and review cases with
+dispositions are built. Name, admission-number and login-email corrections,
 adding students after publication and new windows for missed starts are built
 (student pages, Audience tab, attempt pages). Faulty-question exclusion with a preview and durable
 rescoring is built (Results tab, Scoring).
