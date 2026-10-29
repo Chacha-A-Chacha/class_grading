@@ -17,6 +17,7 @@ import { createAssessment, generateAssessmentSets, publishAssessment, saveBluepr
 import { getAttemptView, saveAnswers, startAttempt, submitAttempt } from "../../src/server/attempts/service";
 import { authorizeRetest, extendAttempt, liveStatus, voidAttempt } from "../../src/server/attempts/admin";
 import { addToPublished, giveNewWindow } from "../../src/server/assessments/assignments";
+import { openReview, requestReview, resolveReview } from "../../src/server/attempts/reviews";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL explicitly. Tests never default to the application database.");
@@ -169,4 +170,28 @@ test("a missed window gives an unused attempt a new window without granting anot
   const after = await db.assessmentAssignment.findUniqueOrThrow({ where: { id: assignment.id } });
   assert.equal(after.allowedAttemptCount, 2, "no extra attempt granted");
   assert.ok((await start(s, id)).attemptId, "the student can start their remaining attempt");
+});
+
+test("review cases: one open per attempt, own finished attempts only, dispositions never touch scores", async () => {
+  const id = await published();
+  const [a, b] = [students[0], students[1]];
+  const mine = (await start(a, id)).attemptId;
+  await assert.rejects(requestReview(db, a.id, mine, "My screen froze during question two"), (e) => code(e) === "NOT_FINISHED");
+  await submitAttempt(db, a.id, mine, randomUUID(), []);
+  const score = await db.scoreRevision.findFirstOrThrow({ where: { attemptId: mine } });
+  await assert.rejects(requestReview(db, b.id, mine, "Not my attempt at all"), (e) => code(e) === "NOT_FOUND", "no access to another student's attempt");
+  const appeal = await requestReview(db, a.id, mine, "My screen froze during question two");
+  await assert.rejects(openReview(db, owner, mine, "Second case"), (e) => code(e) === "ALREADY_OPEN");
+  const opened = await db.reviewCase.findUniqueOrThrow({ where: { id: appeal.id } });
+  assert.match(opened.reason, /^Student request: /);
+  await resolveReview(db, owner, appeal.id, "TECHNICAL_ISSUE", "Connection logs confirm a gap; no change to the grade");
+  await assert.rejects(resolveReview(db, owner, appeal.id, "NO_ISSUE", "Again"), (e) => code(e) === "ALREADY_RESOLVED");
+  const resolved = await db.reviewCase.findUniqueOrThrow({ where: { id: appeal.id } });
+  assert.deepEqual([resolved.status, resolved.disposition], ["RESOLVED", "TECHNICAL_ISSUE"]);
+  const audit = await db.auditLog.findFirstOrThrow({ where: { action: "REVIEW_RESOLVED", targetId: mine } });
+  assert.ok(audit.actorId, "the reviewer is recorded");
+  const after = await db.scoreRevision.findMany({ where: { attemptId: mine } });
+  assert.deepEqual(after.map((r) => [r.scoringRevision, r.rawCorrect]), [[score.scoringRevision, score.rawCorrect]], "no score change");
+  // After resolution a new concern can be raised again.
+  assert.ok((await openReview(db, owner, mine, "Follow-up check")).id);
 });
