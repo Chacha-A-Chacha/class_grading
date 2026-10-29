@@ -81,7 +81,7 @@ export async function releaseDue(db: PrismaClient) {
 /** The student's own result, only after release (A13). Voided attempts carry no score. */
 export async function studentResult(db: PrismaClient, userId: string, attemptId: string): Promise<StudentResult> {
   const a = await db.attempt.findFirst({ where: { id: attemptId, assignment: { userId } }, select: {
-    attemptNumber: true, status: true, submittedAt: true, passPercent: true,
+    attemptNumber: true, status: true, submittedAt: true, passPercent: true, assessmentId: true,
     assignment: { select: { assessment: { select: { title: true, releasedAt: true, exclusions: { select: { questionVersionId: true } } } } } },
     scores: { orderBy: { scoringRevision: "desc" }, take: 1 },
     questions: { orderBy: { setItem: { position: "asc" } }, select: {
@@ -96,12 +96,14 @@ export async function studentResult(db: PrismaClient, userId: string, attemptId:
   if (a.status === "ACTIVE") throw new AppError("NOT_FINISHED", "This attempt is still in progress.", 409);
   const status = a.status as StudentResult["status"];
   const base = { attemptId, attemptNumber: a.attemptNumber, title: assessment.title, status, submittedAt: a.submittedAt?.toISOString() ?? null };
-  if (status === "VOIDED") return { ...base, score: null, questions: [] };
+  if (status === "VOIDED") return { ...base, score: null, recalculating: false, questions: [] };
+  const recalculating = (await db.job.count({ where: { kind: "RESCORE", status: { in: ["PENDING", "RUNNING"] }, assessmentId: a.assessmentId } })) > 0;
   const excluded = new Set(assessment.exclusions.map((e) => e.questionVersionId));
   const score = a.scores[0];
   return {
     ...base,
-    score: score ? { correct: score.rawCorrect, included: score.availablePoints, passed: score.passed, passPercent: Number(a.passPercent) } : null,
+    score: score ? { correct: score.rawCorrect, included: score.availablePoints, passed: score.passed, passPercent: Number(a.passPercent), revision: score.scoringRevision } : null,
+    recalculating,
     questions: a.questions.map((q) => {
       const v = q.setItem.questionVersion, keys = v.answerKeys.map((k) => k.correctOptionId);
       const chosen = new Set(q.answer ? (q.answer.selectedOptionId ? [q.answer.selectedOptionId] : q.answer.selectedOptionIds) : []);

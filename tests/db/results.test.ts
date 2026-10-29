@@ -17,6 +17,7 @@ import { createAssessment, generateAssessmentSets, publishAssessment, saveBluepr
 import { getAttemptView, saveAnswers, startAttempt, submitAttempt } from "../../src/server/attempts/service";
 import { authorizeRetest, voidAttempt } from "../../src/server/attempts/admin";
 import { exportResults, readiness, releaseDue, releaseResults, setReleaseHold, studentResult } from "../../src/server/results/service";
+import { excludeQuestion, exclusionPreview, runJobs } from "../../src/server/results/rescore";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL explicitly. Tests never default to the application database.");
@@ -48,10 +49,10 @@ before(async () => {
 after(async () => { await db.$disconnect(); if (created && /^grading_results_test_[a-f0-9]{32}$/.test(schema)) await pool.query(`DROP SCHEMA "${schema}" CASCADE`); await pool.end(); });
 
 /** A published two-question assessment open now; `held` selects hold-for-owner release. */
-async function published(userIds: string[], held = false) {
+async function published(userIds: string[], held = false, sets = 1) {
   const { id } = await createAssessment(db, owner, detailsSchema.parse({ title: "Quiz", durationMinutes: 20, passPercent: 50, openAt: at(-1), latestStartAt: at(2), hardCloseAt: at(3), releaseHeld: held }));
   await saveBlueprint(db, owner, id, 1, [0, 1].map(() => ({ topicId: loops, objective: "", kind: "THEORY" as const, difficulty: "EASY" as const, maxSeconds: null })));
-  assert.ok((await generateAssessmentSets(db, owner, id, 2, 1)).ok);
+  assert.ok((await generateAssessmentSets(db, owner, id, 2, sets)).ok);
   await setAudience(db, owner, id, 3, userIds);
   await publishAssessment(db, owner, id, 4);
   return id;
@@ -85,7 +86,8 @@ test("release waits for every window, then shows students only their own scored 
   assert.ok(releasedAt);
   await assert.rejects(releaseResults(db, owner, id), (e) => code(e) === "ALREADY_RELEASED");
   const result = await studentResult(db, students[0].id, attemptId);
-  assert.deepEqual(result.score, { correct: 1, included: 2, passed: true, passPercent: 50 });
+  assert.deepEqual(result.score, { correct: 1, included: 2, passed: true, passPercent: 50, revision: 1 });
+  assert.equal(result.recalculating, false);
   assert.equal(result.questions.length, 2);
   assert.equal(result.questions[0].correct, true); assert.equal(result.questions[1].correct, false);
   assert.match(result.questions[0].explanation, /^Explanation \d$/);
@@ -167,4 +169,60 @@ test("CSV export lists every student, neutralises formulas and labels provisiona
   const row = lines.find((l) => l.includes(attemptId))!;
   assert.ok(row.includes('"1","2","50.0%","yes"'));
   assert.ok(row.endsWith('"provisional"'));
+});
+
+test("A12: excluding a question rescores every attempt durably, keeps history and gates release", async () => {
+  const id = await published([students[0].id, students[1].id], false, 2);
+  const attempts: string[] = [];
+  for (const s of [students[0], students[1]]) {
+    const { attemptId } = await start(s, id);
+    await answerFirstCorrectly(s, attemptId);
+    await submitAttempt(db, s.id, attemptId, randomUUID(), []);
+    attempts.push(attemptId);
+  }
+  // Exclude a question that only one set contains, so the other set's denominator is unchanged.
+  const sets = await db.assessmentSet.findMany({ where: { assessmentId: id }, include: { items: true }, orderBy: { label: "asc" } });
+  const onlyA = sets[0].items.find((i) => !sets[1].items.some((j) => j.questionVersionId === i.questionVersionId))!;
+  const preview = await exclusionPreview(db, id, onlyA.questionVersionId);
+  assert.deepEqual(preview.sets.map((x) => [x.label, x.includedBefore, x.includedAfter]), [["A", 2, 1]]);
+  await assert.rejects(exclusionPreview(db, id, randomUUID()), (e) => code(e) === "NOT_FOUND");
+  const { scoringRevision } = await excludeQuestion(db, owner, id, onlyA.questionVersionId, "Two options were both correct");
+  assert.equal(scoringRevision, 2);
+  await assert.rejects(excludeQuestion(db, owner, id, onlyA.questionVersionId, "Again"), (e) => code(e) === "ALREADY_EXCLUDED");
+  await closeWindows(id);
+  const pending = await readiness(db, id);
+  assert.equal(pending.ready, false); assert.equal(pending.pendingJobs, 1); assert.equal(pending.unscored, 2);
+  // Simulate a worker that crashed mid-job: running, lease expired, half the attempts done.
+  const job = await db.job.findFirstOrThrow({ where: { assessmentId: id, kind: "RESCORE" } });
+  await db.$transaction(async (tx) => { const { scoreAttempt } = await import("../../src/server/attempts/service"); await scoreAttempt(tx, attempts[0]); });
+  await db.$executeRaw`UPDATE "Job" SET status = 'RUNNING', "leaseToken" = gen_random_uuid(), "leaseUntil" = clock_timestamp() - interval '1 minute', attempts = 1 WHERE id = ${job.id}::uuid`;
+  assert.equal(await runJobs(db), 1, "the expired lease is reclaimed and the job resumes");
+  const finished = await db.job.findUniqueOrThrow({ where: { id: job.id } });
+  assert.equal(finished.status, "SUCCEEDED"); assert.equal(finished.leaseToken, null);
+  for (const attemptId of attempts) {
+    const revisions = await db.scoreRevision.findMany({ where: { attemptId }, orderBy: { scoringRevision: "asc" } });
+    assert.deepEqual(revisions.map((r) => r.scoringRevision), [1, 2], "history kept, no duplicates");
+    const set = (await db.attempt.findUniqueOrThrow({ where: { id: attemptId }, select: { set: { select: { label: true } } } })).set.label;
+    assert.equal(revisions[1].availablePoints, set === "A" ? 1 : 2);
+  }
+  assert.equal((await readiness(db, id)).ready, true);
+  await releaseResults(db, owner, id);
+  const mine = await studentResult(db, students[0].id, attempts[0]);
+  assert.equal(mine.score?.revision, 2);
+  const mySet = (await db.attempt.findUniqueOrThrow({ where: { id: attempts[0] }, select: { set: { select: { label: true } } } })).set.label;
+  assert.equal(mine.questions.filter((q) => q.excluded).length, mySet === "A" ? 1 : 0, "only set A shows the question as not counted");
+});
+
+test("excluding every question makes results ungradable; a superseded job ends cleanly", async () => {
+  const id = await published([students[2].id]);
+  const { attemptId } = await start(students[2], id);
+  await submitAttempt(db, students[2].id, attemptId, randomUUID(), []);
+  const items = await db.setItem.findMany({ where: { set: { assessmentId: id } } });
+  for (const item of items) await excludeQuestion(db, owner, id, item.questionVersionId, "Faulty question");
+  assert.equal(await db.job.count({ where: { assessmentId: id, status: "PENDING" } }), 2);
+  // The older job is superseded by the newer revision and completes without scoring.
+  assert.equal(await runJobs(db), 2);
+  const latest = await db.scoreRevision.findFirstOrThrow({ where: { attemptId }, orderBy: { scoringRevision: "desc" } });
+  assert.deepEqual([latest.scoringRevision, latest.availablePoints, latest.passed], [3, 0, null]);
+  assert.equal(await db.scoreRevision.count({ where: { attemptId, scoringRevision: 2 } }), 0, "superseded revision never written");
 });

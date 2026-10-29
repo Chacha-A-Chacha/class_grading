@@ -18,7 +18,9 @@ export type StudentResult = {
   title: string;
   status: "SUBMITTED" | "EXPIRED" | "VOIDED";
   submittedAt: string | null;
-  score: { correct: number; included: number; passed: boolean | null; passPercent: number } | null;
+  score: { correct: number; included: number; passed: boolean | null; passPercent: number; revision: number } | null;
+  /** A question was removed from scoring and the new scores are still being calculated. */
+  recalculating: boolean;
   questions: {
     position: number; excluded: boolean; correct: boolean; answerMode: "SINGLE" | "MULTIPLE";
     prompt: string; code: string | null; language: string | null; runtimeContext: string | null; explanation: string;

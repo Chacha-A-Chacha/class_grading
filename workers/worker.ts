@@ -4,6 +4,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { expireOverdue } from "../src/server/attempts/service";
 import { releaseDue } from "../src/server/results/service";
+import { runJobs } from "../src/server/results/rescore";
 
 // Separate process from the web app (specification §2). Reads and writes also resolve
 // overdue attempts, so worker downtime delays the stored state but never admits late answers.
@@ -22,13 +23,20 @@ async function main() {
   const db = database();
   const stop = new AbortController();
   for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => stop.abort());
-  console.log("Worker started: expiry sweep and automatic result release every 15 seconds.");
+  console.log("Worker started: expiry sweep, scoring jobs and automatic result release every 15 seconds.");
   while (!stop.signal.aborted) {
     try {
       const expired = await expireOverdue(db);
       if (expired) console.log(`Expired ${expired} overdue attempt(s).`);
     } catch (error) {
       console.error("Expiry sweep failed; retrying next cycle.", error instanceof Error ? error.message : "");
+    }
+    try {
+      // Rescoring before the release check, so a finished job can unblock release in the same cycle.
+      const jobs = await runJobs(db);
+      if (jobs) console.log(`Finished ${jobs} scoring job(s).`);
+    } catch (error) {
+      console.error("Job run failed; retrying next cycle.", error instanceof Error ? error.message : "");
     }
     try {
       // After expiry, so attempts that just ended are finalised and scored before the barrier check.
