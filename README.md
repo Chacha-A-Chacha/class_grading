@@ -94,10 +94,16 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   barrier is met; held ones wait for the owner. Release locks the assessment row, so
   starts, retests and extensions cannot race it (A11). Students then see their score,
   answers, correct answers and explanations on their own result page only (A13); the
-  owner can download a formula-safe CSV at any time. Tests in `tests/db/results.test.ts`.
+  owner can download a formula-safe CSV at any time.
+- **Faulty questions:** the Scoring panel excludes a question version for everyone who
+  saw it, after a per-set preview of the new denominators. Exclusion adds a scoring
+  revision and a durable rescore job; the worker claims jobs with `SKIP LOCKED` leases,
+  resumes an interrupted job from an expired lease without duplicates (A12), retries
+  with backoff and stops after five failures (owner can retry). Earlier score
+  revisions are kept and release waits for the rescore. Tests in `tests/db/results.test.ts`.
 
 The device-local recovery queue, takeover and late evidence (milestone 4), incident
-review, exclusion/rescore, reports, readiness
+review, reports, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
 student's name, admission number or login email is not built yet. Liveness only
 proves the application can respond; it does not certify exam readiness.
