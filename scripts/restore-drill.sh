@@ -38,5 +38,5 @@ echo "Live:     $(psql "$live" -At -F ' | ' -c "$query")"
 echo "Restore took ${seconds}s (target: under 3600s)"
 
 # Leave the scratch database empty for the next drill.
-psql "$drill" -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+psql "$drill" -q -c "SET client_min_messages = warning; DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 echo "Drill database cleared."
