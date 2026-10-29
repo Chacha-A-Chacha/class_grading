@@ -114,8 +114,15 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   Student pages correct the name or admission number (old values kept in the audit)
   and change the login email after an identity check, ending sessions and codes until
   the new address is verified. Tests in `tests/db/overrides.test.ts` and `admin.test.ts`.
+- **One writer per attempt (A06, A18):** answer saves, review marks, submission and
+  page-activity reports are accepted only from the browser session that owns the
+  attempt's current generation. A second tab in the same browser opens read-only
+  (BroadcastChannel) and takes over by confirming; another device or browser gets a
+  fresh email code bound to that browser and attempt, and entering it consumes a
+  single-use grant and rotates the generation, so earlier writers fail at once. Each
+  takeover is a server event in the attempt timeline. Tests in `tests/db/attempts.test.ts`.
 
-The device-local recovery queue, takeover and late evidence (milestone 4), incident
+The device-local recovery queue and late evidence (milestone 4), incident
 review, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Liveness only
 proves the application can respond; it does not certify exam readiness.
