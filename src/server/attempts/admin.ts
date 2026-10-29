@@ -124,6 +124,7 @@ export async function attemptDetail(db: PrismaClient, attemptId: string) {
   const away = await db.attemptEvent.findMany({ where: { attemptId, kind: { in: ["AWAY", "SMALL_WINDOW", "TAKEOVER"] } }, orderBy: [{ serverReceivedAt: "asc" }, { id: "asc" }], select: { id: true, kind: true, clientOccurredAt: true, clientEndedAt: true, serverReceivedAt: true, metadata: true } });
   // Untrusted, unscored changes kept for review (A05); never merged into the answers.
   const evidence = await db.lateAnswerEvidence.findMany({ where: { attemptId }, orderBy: [{ serverReceivedAt: "asc" }, { id: "asc" }], select: { id: true, clientOccurredAt: true, serverReceivedAt: true, payload: true } });
-  return { ...attempt, audits, away, evidence };
+  const reviews = await db.reviewCase.findMany({ where: { attemptId }, orderBy: { createdAt: "desc" } });
+  return { ...attempt, audits, away, evidence, reviews };
 }
 export type AttemptDetail = NonNullable<Awaited<ReturnType<typeof attemptDetail>>>;

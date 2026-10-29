@@ -13,6 +13,8 @@ import { ScoringPanel } from "@/components/admin/assessments/scoring-panel";
 import { assessmentReport } from "@/server/results/reports";
 import { ReportsPanel } from "@/components/admin/assessments/reports-panel";
 import { AddStudentsPanel } from "@/components/admin/assessments/add-students-panel";
+import { assessmentReviews } from "@/server/attempts/reviews";
+import { DISPOSITION_TEXT } from "@/shared/reviews";
 import { defaultWindow } from "@/shared/assessments";
 import { nairobiFormat, overlapPercent, toNairobiInput } from "@/shared/assessments";
 import { AudiencePanel } from "@/components/admin/assessments/audience-panel";
@@ -31,7 +33,7 @@ export default async function AssessmentPage({ params, searchParams }: { params:
   const a = await getAssessment(db, id);
   if (!a) notFound();
   const draft = a.status === "DRAFT";
-  const [topics, supply, counts, students, checks, live, results, release, scoring, report] = await Promise.all([
+  const [topics, supply, counts, students, checks, live, results, release, scoring, report, reviews] = await Promise.all([
     db.topic.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     blueprintSupply(db),
     slotCandidateCounts(db, a.blueprintSlots),
@@ -42,6 +44,7 @@ export default async function AssessmentPage({ params, searchParams }: { params:
     a.status === "PUBLISHED" ? readiness(db, id) : Promise.resolve(null),
     a.status === "PUBLISHED" ? scoringState(db, id) : Promise.resolve(null),
     a.status === "PUBLISHED" ? assessmentReport(db, id) : Promise.resolve(null),
+    draft ? Promise.resolve(null) : assessmentReviews(db, id),
   ]);
   // One entry per question version, labelled with where it appears ("Set A Q3, Set C Q7").
   const where = new Map<string, { places: string[]; prompt: string; version: number }>();
@@ -51,7 +54,7 @@ export default async function AssessmentPage({ params, searchParams }: { params:
   }
   const questionLabel = (id: string) => { const e = where.get(id); return e ? `${e.places.slice(0, 3).join(", ")}${e.places.length > 3 ? ` +${e.places.length - 3}` : ""}: ${e.prompt.replace(/\s+/g, " ").slice(0, 70)}` : id; };
   // ?tab= opens a specific tab, e.g. a link straight to Results or Reports.
-  const tabs = [live && "live", results && "results", report && "reports", "details", "blueprint", "sets", "audience", draft && "publish"].filter(Boolean) as string[];
+  const tabs = [live && "live", reviews && "reviews", results && "results", report && "reports", "details", "blueprint", "sets", "audience", draft && "publish"].filter(Boolean) as string[];
   const requested = (await searchParams).tab;
   const initialTab = requested && tabs.includes(requested) ? requested : draft ? "details" : "live";
   const rules = a.rulesSnapshot as { instructions?: string; permittedMaterials?: string };
@@ -62,13 +65,16 @@ export default async function AssessmentPage({ params, searchParams }: { params:
     <div className="space-y-2"><div className="flex flex-wrap items-center gap-3"><h1 className="text-3xl font-semibold">{a.title}</h1><Badge variant={draft ? "secondary" : "default"}>{draft ? "Draft" : a.status === "PUBLISHED" ? "Published" : "Archived"}</Badge></div>
       <p className="text-muted-foreground">Opens {nairobiFormat.format(a.openAt)} · latest start {nairobiFormat.format(a.latestStartAt)} · closes {nairobiFormat.format(a.hardCloseAt)} · {Math.round(a.durationSeconds / 60)} minutes</p>
       {!draft && <p className="text-sm text-muted-foreground">Published {a.publishedAt && nairobiFormat.format(a.publishedAt)}. Content and settings are frozen.</p>}</div>
-    <Tabs defaultValue={initialTab}><TabsList className="flex-wrap">{live && <TabsTrigger value="live">Live</TabsTrigger>}{results && <TabsTrigger value="results">Results</TabsTrigger>}{report && <TabsTrigger value="reports">Reports</TabsTrigger>}<TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="blueprint">Blueprint</TabsTrigger><TabsTrigger value="sets">Sets</TabsTrigger><TabsTrigger value="audience">Audience</TabsTrigger>{draft && <TabsTrigger value="publish">Publish</TabsTrigger>}</TabsList>
+    <Tabs defaultValue={initialTab}><TabsList className="flex-wrap">{live && <TabsTrigger value="live">Live</TabsTrigger>}{reviews && <TabsTrigger value="reviews">Reviews{reviews.some((r) => r.status === "OPEN") ? ` (${reviews.filter((r) => r.status === "OPEN").length})` : ""}</TabsTrigger>}{results && <TabsTrigger value="results">Results</TabsTrigger>}{report && <TabsTrigger value="reports">Reports</TabsTrigger>}<TabsTrigger value="details">Details</TabsTrigger><TabsTrigger value="blueprint">Blueprint</TabsTrigger><TabsTrigger value="sets">Sets</TabsTrigger><TabsTrigger value="audience">Audience</TabsTrigger>{draft && <TabsTrigger value="publish">Publish</TabsTrigger>}</TabsList>
       {live && <TabsContent value="live" className="pt-4"><LivePanel live={live} /></TabsContent>}
       {results && release && <TabsContent value="results" className="pt-4"><div className="space-y-6"><ResultsPanel assessmentId={id} rows={results} readiness={release} />{scoring && <ScoringPanel assessmentId={id}
         questions={[...where.keys()].map((versionId) => ({ versionId, label: questionLabel(versionId) }))}
         exclusions={scoring.exclusions.map((x) => ({ versionId: x.questionVersionId, label: questionLabel(x.questionVersionId), reason: x.reason, revision: x.scoringRevision }))}
         progress={{ revision: scoring.scoringRevision, terminal: scoring.terminal, scored: scoring.scoredAtCurrent }}
         jobs={scoring.jobs.map((j) => ({ id: j.id, status: j.status, revision: j.scoringRevision, attempts: j.attempts, lastError: j.lastError }))} />}</div></TabsContent>}
+      {reviews && <TabsContent value="reviews" className="pt-4">{!reviews.length ? <p className="text-sm text-muted-foreground">No reviews yet. Open one from an attempt, or a student can ask for one after their attempt.</p> : <ul className="space-y-3">{reviews.map((r) => <li key={r.id} className="rounded-lg border p-3">
+        <p className="font-medium"><Link className="text-primary hover:underline" href={`/admin/attempts/${r.attempt.id}`}>{r.attempt.assignment.user.displayName}</Link>{r.attempt.assignment.user.admissionNumber && <span className="text-sm text-muted-foreground"> · {r.attempt.assignment.user.admissionNumber}</span>} · attempt #{r.attempt.attemptNumber} · <Badge variant={r.status === "OPEN" ? "default" : "secondary"}>{r.status === "OPEN" ? "Open" : r.disposition ? DISPOSITION_TEXT[r.disposition] : "Resolved"}</Badge></p>
+        <p className="text-sm text-muted-foreground">{nairobiFormat.format(r.createdAt)}: {r.reason}{r.resolution ? ` Outcome: ${r.resolution}` : ""}</p></li>)}</ul>}</TabsContent>}
       {report && <TabsContent value="reports" className="pt-4"><ReportsPanel report={report} /></TabsContent>}
       <TabsContent value="details" className="max-w-4xl pt-4"><DetailsForm readOnly={!draft} assessment={{ id, recordVersion: a.recordVersion }} initial={{ title: a.title, instructions: rules.instructions ?? "", permittedMaterials: rules.permittedMaterials ?? "", durationMinutes: Math.round(a.durationSeconds / 60), passPercent: Number(a.passPercent), openAt: toNairobiInput(a.openAt), latestStartAt: toNairobiInput(a.latestStartAt), hardCloseAt: toNairobiInput(a.hardCloseAt), maxOverlapPercent: Number(a.maxOverlapPercent), releaseHeld: a.releaseHeld }} /></TabsContent>
       <TabsContent value="blueprint" className="pt-4"><BlueprintEditor assessmentId={id} recordVersion={a.recordVersion} readOnly={!draft} hasSets={a.sets.length > 0} topics={topics} supply={supply} initial={a.blueprintSlots.map((s, i) => ({ topicId: s.topicId, objective: s.objective, kind: s.kind, difficulty: s.difficulty, maxSeconds: s.maxSeconds, available: counts[i] }))} /></TabsContent>

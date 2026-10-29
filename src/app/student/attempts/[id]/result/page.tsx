@@ -8,6 +8,7 @@ import { studentResult } from "@/server/results/service";
 import { AppError } from "@/server/errors";
 import { percentText } from "@/shared/results";
 import { CodeBlock } from "@/components/code-block";
+import { AppealForm } from "@/components/student/appeal-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,6 +58,7 @@ export default async function ResultPage({ params }: { params: Promise<{ id: str
         {q.explanation && <div className="rounded-lg bg-muted p-3 text-sm"><p className="font-medium">Explanation</p><p className="whitespace-pre-wrap">{q.explanation}</p></div>}
       </CardContent></Card>)}
     </section>
+    <Card><CardHeader><CardTitle><h2>Something wrong?</h2></CardTitle><CardDescription>Attempt reference <span className="font-mono">{result.attemptId}</span></CardDescription></CardHeader><CardContent><AppealForm attemptId={result.attemptId} /></CardContent></Card>
     {back}
   </div>;
 }

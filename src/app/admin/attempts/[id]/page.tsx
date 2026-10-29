@@ -7,6 +7,7 @@ import { attemptDetail } from "@/server/attempts/admin";
 import { isCorrect } from "@/server/attempts/service";
 import { defaultWindow, nairobiFormat } from "@/shared/assessments";
 import { NewWindowForm } from "@/components/admin/new-window-form";
+import { ReviewPanel } from "@/components/admin/review-panel";
 import { AttemptActions } from "@/components/admin/attempt-actions";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,6 +66,7 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
       <Card><CardHeader><CardTitle className="text-sm font-normal text-muted-foreground">Score{score && score.scoringRevision > 1 ? ` (revision ${score.scoringRevision})` : ""}</CardTitle></CardHeader><CardContent>{!score ? (a.status === "ACTIVE" ? "In progress" : "—") : score.availablePoints === 0 ? "Ungradable" : <>{score.rawCorrect}/{score.availablePoints} ({Math.round((score.rawCorrect / score.availablePoints) * 1000) / 10}%) · {score.passed ? "Pass" : "Not passed"}{a.status === "VOIDED" && " · voided"}</>}</CardContent></Card>
     </div>
     <AttemptActions attemptId={a.id} recordVersion={a.recordVersion} status={a.status} released={!!assignment.assessment.releasedAt} retest={canRetest ? { assignmentId: assignment.id, recordVersion: assignment.recordVersion, durationMinutes: Math.round(assignment.durationSeconds / 60), defaults } : null} />
+    <Card><CardHeader><CardTitle><h2>Review</h2></CardTitle><CardDescription>For incidents, page-activity records or a student&apos;s request. The outcome is recorded with your name and never changes the score.</CardDescription></CardHeader><CardContent><ReviewPanel attemptId={a.id} cases={a.reviews.map((r) => ({ id: r.id, status: r.status, disposition: r.disposition, reason: r.reason, resolution: r.resolution, createdAt: r.createdAt.toISOString(), resolvedAt: r.resolvedAt?.toISOString() ?? null }))} /></CardContent></Card>
     {canReschedule && <Card><CardHeader><CardTitle><h2>Give a new window</h2></CardTitle><CardDescription>This student has an unused attempt but their window to start has passed.</CardDescription></CardHeader><CardContent><NewWindowForm assignmentId={assignment.id} recordVersion={assignment.recordVersion} durationMinutes={Math.round(assignment.durationSeconds / 60)} defaults={defaults} /></CardContent></Card>}
     <Card><CardHeader><CardTitle><h2>Answers</h2></CardTitle></CardHeader><CardContent>
       <Table><TableCaption>Letters follow the order this student saw. Only server-accepted answers are shown.</TableCaption><TableHeader><TableRow><TableHead>#</TableHead><TableHead>Question</TableHead><TableHead>Chosen</TableHead><TableHead>Correct</TableHead><TableHead>Result</TableHead></TableRow></TableHeader><TableBody>

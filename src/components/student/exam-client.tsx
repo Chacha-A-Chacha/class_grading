@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { useAwayTracking } from "./use-away-tracking";
 import { TakeoverPanel } from "./takeover-panel";
 import { type Queued, clear, keep, load, settle } from "./local-queue";
+import { AppealForm } from "./appeal-form";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 const HEARTBEAT_MS = 15_000;
@@ -250,6 +251,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
       {evidenceNote && <p className="text-sm">Some answers reached the server after the deadline. They are kept for your instructor to review and are not scored.</p>}
       <p className="text-sm text-muted-foreground">Results are released after every student&apos;s answering window has closed. Attempt reference: <span className="font-mono">{id}</span></p>
       <Button asChild variant="outline"><Link href="/student">Back to your assessments</Link></Button>
+      {status !== "VOIDED" && <div className="border-t pt-4"><AppealForm attemptId={id} /></div>}
     </CardContent></Card>;
   }
 
