@@ -1,7 +1,7 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Public liveness only; database readiness is added with persistence.
+// Public liveness only: the process can respond. Readiness is /api/v1/health/ready.
 export function GET() {
   return Response.json(
     { status: "ok" },

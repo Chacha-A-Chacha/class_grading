@@ -8,6 +8,7 @@ import { after, before, test } from "node:test";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../../src/generated/prisma/client";
+import { readiness } from "../../src/server/health";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL to a PostgreSQL test database. DATABASE_URL is never used as a fallback.");
@@ -220,4 +221,15 @@ test("admission numbers are stored normalized; activated versions may bump recor
   const f = await fixture();
   await prisma.questionVersion.update({ where: { id: f.q.id }, data: { status: "RETIRED", recordVersion: { increment: 1 } } });
   await rejectsSql(`UPDATE "QuestionVersion" SET prompt = 'Changed' WHERE id = $1`, [f.q.id], "23514");
+});
+
+test("readiness reports ready only when every shipped migration is applied", async () => {
+  assert.deepEqual(await readiness(prisma), { ready: true });
+  const [latest] = await prisma.$queryRaw<{ id: string; migration_name: string }[]>`SELECT id, migration_name FROM "_prisma_migrations" ORDER BY migration_name DESC LIMIT 1`;
+  await prisma.$executeRaw`UPDATE "_prisma_migrations" SET rolled_back_at = now() WHERE id = ${latest.id}`;
+  assert.deepEqual(await readiness(prisma), { ready: false, reason: "migrations" }, "a shipped migration is not applied");
+  await prisma.$executeRaw`UPDATE "_prisma_migrations" SET rolled_back_at = NULL, finished_at = NULL WHERE id = ${latest.id}`;
+  assert.deepEqual(await readiness(prisma), { ready: false, reason: "migrations" }, "a half-applied migration");
+  await prisma.$executeRaw`UPDATE "_prisma_migrations" SET finished_at = now() WHERE id = ${latest.id}`;
+  assert.deepEqual(await readiness(prisma), { ready: true });
 });
