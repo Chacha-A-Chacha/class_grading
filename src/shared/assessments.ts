@@ -53,3 +53,15 @@ export function overlapPercent(a: string[], b: string[]): number {
   const other = new Set(b);
   return (a.filter((id) => other.has(id)).length / a.length) * 100;
 }
+
+/**
+ * Default window for a retest, late addition or new window: the assessment's own latest
+ * start and close while they are still ahead, otherwise one hour from now (rounded up to
+ * five minutes). Times are Nairobi form values; the server validates them again.
+ */
+export function defaultWindow(latestStartAt: Date, hardCloseAt: Date, durationSeconds: number, time: Date) {
+  const fiveMinutes = 5 * 60_000;
+  const latest = latestStartAt.getTime() > time.getTime() + 15 * 60_000 ? latestStartAt : new Date(Math.ceil((time.getTime() + 3600_000) / fiveMinutes) * fiveMinutes);
+  const close = new Date(Math.max(latest === latestStartAt ? hardCloseAt.getTime() : 0, latest.getTime() + durationSeconds * 1000));
+  return { latestStartAt: toNairobiInput(latest), hardCloseAt: toNairobiInput(close) };
+}

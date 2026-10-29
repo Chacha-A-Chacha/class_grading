@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 
 type Props = {
   attemptId: string; recordVersion: number; status: string; released: boolean;
-  retest: { assignmentId: string; recordVersion: number; durationMinutes: number } | null;
+  retest: { assignmentId: string; recordVersion: number; durationMinutes: number; defaults: { latestStartAt: string; hardCloseAt: string } } | null;
 };
 
 /** Every override needs a reason and is recorded in the audit history. */
@@ -19,7 +19,8 @@ export function AttemptActions({ attemptId, recordVersion, status, released, ret
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
   const [extend, setExtend] = useState({ minutes: "10", reason: "" });
   const [voidReason, setVoidReason] = useState("");
-  const [schedule, setSchedule] = useState({ latestStartAt: "", hardCloseAt: "", reason: "" });
+  // Defaults to the assessment's own window when it is still ahead, so a retest is never minutes long by accident.
+  const [schedule, setSchedule] = useState({ latestStartAt: retest?.defaults.latestStartAt ?? "", hardCloseAt: retest?.defaults.hardCloseAt ?? "", reason: "" });
 
   async function send(url: string, body: object, success: (r: Record<string, unknown>) => string) {
     setBusy(true); setMessage(null);

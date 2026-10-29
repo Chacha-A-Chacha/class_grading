@@ -5,10 +5,11 @@ import { adminPage } from "@/server/auth/http";
 import { getDatabase } from "@/server/db";
 import { attemptDetail } from "@/server/attempts/admin";
 import { isCorrect } from "@/server/attempts/service";
-import { nairobiFormat } from "@/shared/assessments";
+import { defaultWindow, nairobiFormat } from "@/shared/assessments";
+import { NewWindowForm } from "@/components/admin/new-window-form";
 import { AttemptActions } from "@/components/admin/attempt-actions";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
@@ -38,6 +39,10 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
   ].sort((x, y) => x.at.getTime() - y.at.getTime());
   const assignment = a.assignment;
   const canRetest = assignment.assessment.status === "PUBLISHED" && !assignment.assessment.releasedAt && !assignment.attempts.some((x) => x.status === "ACTIVE") && assignment.attempts.length >= assignment.allowedAttemptCount;
+  // An unused attempt whose window has passed needs a new window, not another attempt.
+  const open = assignment.assessment.status === "PUBLISHED" && !assignment.assessment.releasedAt && !assignment.attempts.some((x) => x.status === "ACTIVE");
+  const canReschedule = open && assignment.attempts.length < assignment.allowedAttemptCount && assignment.latestStartAt <= new Date();
+  const defaults = defaultWindow(assignment.assessment.latestStartAt, assignment.assessment.hardCloseAt, assignment.durationSeconds, new Date());
 
   return <div className="space-y-6">
     <Link href={`/admin/assessments/${assignment.assessment.id}`} className="text-sm text-primary hover:underline">Back to {assignment.assessment.title}</Link>
@@ -49,7 +54,8 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
       <Card><CardHeader><CardTitle className="text-sm font-normal text-muted-foreground">Last contact</CardTitle></CardHeader><CardContent>{a.lastSeenAt ? nairobiFormat.format(a.lastSeenAt) : "—"}</CardContent></Card>
       <Card><CardHeader><CardTitle className="text-sm font-normal text-muted-foreground">Score{score && score.scoringRevision > 1 ? ` (revision ${score.scoringRevision})` : ""}</CardTitle></CardHeader><CardContent>{!score ? (a.status === "ACTIVE" ? "In progress" : "—") : score.availablePoints === 0 ? "Ungradable" : <>{score.rawCorrect}/{score.availablePoints} ({Math.round((score.rawCorrect / score.availablePoints) * 1000) / 10}%) · {score.passed ? "Pass" : "Not passed"}{a.status === "VOIDED" && " · voided"}</>}</CardContent></Card>
     </div>
-    <AttemptActions attemptId={a.id} recordVersion={a.recordVersion} status={a.status} released={!!assignment.assessment.releasedAt} retest={canRetest ? { assignmentId: assignment.id, recordVersion: assignment.recordVersion, durationMinutes: Math.round(assignment.durationSeconds / 60) } : null} />
+    <AttemptActions attemptId={a.id} recordVersion={a.recordVersion} status={a.status} released={!!assignment.assessment.releasedAt} retest={canRetest ? { assignmentId: assignment.id, recordVersion: assignment.recordVersion, durationMinutes: Math.round(assignment.durationSeconds / 60), defaults } : null} />
+    {canReschedule && <Card><CardHeader><CardTitle><h2>Give a new window</h2></CardTitle><CardDescription>This student has an unused attempt but their window to start has passed.</CardDescription></CardHeader><CardContent><NewWindowForm assignmentId={assignment.id} recordVersion={assignment.recordVersion} durationMinutes={Math.round(assignment.durationSeconds / 60)} defaults={defaults} /></CardContent></Card>}
     <Card><CardHeader><CardTitle><h2>Answers</h2></CardTitle></CardHeader><CardContent>
       <Table><TableCaption>Letters follow the order this student saw. Only server-accepted answers are shown.</TableCaption><TableHeader><TableRow><TableHead>#</TableHead><TableHead>Question</TableHead><TableHead>Chosen</TableHead><TableHead>Correct</TableHead><TableHead>Result</TableHead></TableRow></TableHeader><TableBody>
         {a.questions.map((q) => { const v = q.setItem.questionVersion; const keys = v.answerKeys.map((k) => k.correctOptionId); const chosen = q.answer ? (q.answer.selectedOptionId ? [q.answer.selectedOptionId] : q.answer.selectedOptionIds) : []; const letters = (ids: string[]) => ids.map((id) => letter(q, id)).sort().join(", "); return <TableRow key={q.id}>

@@ -108,7 +108,7 @@ export async function liveStatus(db: PrismaClient, assessmentId: string) {
 /** Everything an owner needs to review one attempt, including the answer key. */
 export async function attemptDetail(db: PrismaClient, attemptId: string) {
   const attempt = await db.attempt.findUnique({ where: { id: attemptId }, include: {
-    assignment: { select: { id: true, recordVersion: true, durationSeconds: true, allowedAttemptCount: true, hardCloseAt: true, user: { select: { id: true, displayName: true, email: true, admissionNumber: true } }, assessment: { select: { id: true, title: true, status: true, releasedAt: true } }, attempts: { select: { id: true, status: true } } } },
+    assignment: { select: { id: true, recordVersion: true, durationSeconds: true, allowedAttemptCount: true, hardCloseAt: true, latestStartAt: true, user: { select: { id: true, displayName: true, email: true, admissionNumber: true } }, assessment: { select: { id: true, title: true, status: true, releasedAt: true, latestStartAt: true, hardCloseAt: true } }, attempts: { select: { id: true, status: true } } } },
     set: { select: { label: true } },
     scores: { orderBy: { scoringRevision: "desc" } },
     questions: { orderBy: { setItem: { position: "asc" } }, select: {
