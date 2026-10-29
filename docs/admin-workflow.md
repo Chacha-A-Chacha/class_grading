@@ -12,8 +12,8 @@ before leaving, while away (tab title) and on return; the attempt timeline shows
 dispositions and late evidence are not built. Result release is built: a Results tab
 with a release checklist, release now or hold, automatic release by the worker for
 assessments not held, the student result page and CSV export. Profile/email
-correction for conflicting rows, audited schedule changes after publication and
-reports are not built yet. Faulty-question exclusion with a preview and durable
+correction for conflicting rows and audited schedule changes after publication are
+not built yet. Reports are built (Reports tab). Faulty-question exclusion with a preview and durable
 rescoring is built (Results tab, Scoring).
 This plan follows
 [the specification](../SPECIFICATION.md) and the existing Prisma schema.

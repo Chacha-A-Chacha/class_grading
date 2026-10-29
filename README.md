@@ -100,10 +100,16 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   revision and a durable rescore job; the worker claims jobs with `SKIP LOCKED` leases,
   resumes an interrupted job from an expired lease without duplicates (A12), retries
   with backoff and stops after five failures (owner can retry). Earlier score
-  revisions are kept and release waits for the rescore. Tests in `tests/db/results.test.ts`.
+  revisions are kept and release waits for the rescore.
+- **Reports:** a Reports tab with completion, a score distribution (one series in the
+  theme's chart tokens, hover and focus tooltips, table view), technical issues and a
+  per-question table (responses, answered, percent correct, most-chosen wrong option),
+  hardest first. Each student counts once via their latest non-voided finished attempt;
+  under 10 responses is provisional and under 5 is hidden. `?tab=results` or
+  `?tab=reports` opens a tab directly. Tests in `tests/db/results.test.ts`.
 
 The device-local recovery queue, takeover and late evidence (milestone 4), incident
-review, reports, readiness
+review, readiness
 checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
 student's name, admission number or login email is not built yet. Liveness only
 proves the application can respond; it does not certify exam readiness.
