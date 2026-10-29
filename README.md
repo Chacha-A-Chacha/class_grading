@@ -121,10 +121,17 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   fresh email code bound to that browser and attempt, and entering it consumes a
   single-use grant and rotates the generation, so earlier writers fail at once. Each
   takeover is a server event in the attempt timeline. Tests in `tests/db/attempts.test.ts`.
+- **Answers kept on the device and late evidence (A05):** each choice is written to
+  IndexedDB before it is sent and removed once the server acknowledges it, with three
+  states (saved to server, saved on this device, save failed). After a reload or crash
+  on the same device, unsent changes from the current session are re-sent; changes from
+  an older session, or that reached the server after the deadline, are kept as
+  `LateAnswerEvidence`, apart from the score, and shown in the attempt timeline as not
+  scored. Device content expires after seven days. If the browser cannot store data
+  the exam says so and relies on server saves.
 
-The device-local recovery queue and late evidence (milestone 4), incident
-review, readiness
-checks, workers, Docker/Caddy and load testing remain upcoming. Liveness only
+Incident review (dispositions), readiness checks, backups and load testing remain
+upcoming. Liveness only
 proves the application can respond; it does not certify exam readiness.
 Existing root HTML/CSS files remain historical files, outside Next.js routing.
 See the [performance and load plan](docs/performance.md) before building the
