@@ -26,6 +26,12 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
   const letter = (q: (typeof a.questions)[number], optionId: string | null | undefined) => optionId ? LETTERS[q.options.findIndex((o) => o.option.id === optionId)] ?? "?" : null;
   const timeline = [
     ...a.questions.flatMap((q) => q.mutations.map((m) => ({ at: m.acceptedAt, key: m.id, text: `Question ${q.setItem.position}: ${m.selectedOptionId ? `chose ${letter(q, m.selectedOptionId)}` : m.selectedOptionIds.length ? `chose ${m.selectedOptionIds.map((id) => letter(q, id)).sort().join(", ")}` : "cleared the answer"} (revision ${m.resultRevision})`, source: "Answer accepted by the server" }))),
+    ...a.evidence.map((e) => {
+      const m = e.payload as { attemptQuestionId?: string; selectedOptionId?: string | null; selectedOptionIds?: string[] };
+      const q = a.questions.find((x) => x.id === m.attemptQuestionId);
+      const choice = !q ? "an unknown question" : `question ${q.setItem.position}: ${m.selectedOptionId ? `chose ${letter(q, m.selectedOptionId)}` : m.selectedOptionIds?.length ? `chose ${m.selectedOptionIds.map((o) => letter(q, o)).sort().join(", ")}` : "cleared the answer"}`;
+      return { at: e.serverReceivedAt, key: e.id, text: `Arrived after the deadline or from an older session, not scored: ${choice}${e.clientOccurredAt ? ` (queued on the device ${seconds.format(e.clientOccurredAt)})` : ""}`, source: "Student's device (unverified)" };
+    }),
     ...a.away.filter((e) => e.kind === "TAKEOVER").map((e) => {
       const m = (e.metadata ?? {}) as { method?: string; toGeneration?: number };
       return { at: e.serverReceivedAt, key: e.id, text: `Continued in ${m.method === "code" ? "another browser or device (code from email)" : "another tab (confirmed)"}; earlier sessions stopped saving (session ${m.toGeneration ?? "?"})`, source: "Server" };

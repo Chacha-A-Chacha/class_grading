@@ -14,11 +14,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { useAwayTracking } from "./use-away-tracking";
 import { TakeoverPanel } from "./takeover-panel";
+import { type Queued, clear, keep, load, settle } from "./local-queue";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 const HEARTBEAT_MS = 15_000;
-type SaveState = "saved" | "saving" | "failed";
-const SAVE_TEXT: Record<SaveState, string> = { saved: "Saved to server", saving: "Saving…", failed: "Not saved yet. Retrying automatically…" };
+// Three distinct states (specification §6): on the server, only on this device, or neither.
+type SaveState = "saved" | "saving" | "device" | "failed";
+const SAVE_TEXT: Record<SaveState, string> = { saved: "Saved to server", saving: "Saving…", device: "Saved on this device. Sending to the server…", failed: "Save failed. Retrying automatically…" };
 
 function clock(ms: number) {
   const total = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
@@ -40,6 +42,10 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   const [saves, setSaves] = useState<Record<string, SaveState>>({});
   const [online, setOnline] = useState(true);
   const [notice, setNotice] = useState("");
+  const [evidenceNote, setEvidenceNote] = useState(false);
+  // False once this browser fails to store an answer: then only server saves protect it.
+  const [localOk, setLocalOk] = useState(true);
+  const localOkRef = useRef(true);
   // Read-only while another tab or device holds the attempt (specification §6, A06).
   const [readOnly, setReadOnly] = useState<null | "tab" | "device">(initial.owner ? null : "device");
   const readOnlyRef = useRef(readOnly);
@@ -65,6 +71,15 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   }, [generation]);
   const mark = (ids: string[], state: SaveState) => setSaves((prev) => ({ ...prev, ...Object.fromEntries(ids.map((q) => [q, state])) }));
 
+  /** Rejected changes go to evidence, kept apart from the score, then leave this device (A05). */
+  const sendEvidence = useCallback(async (records: { mutation: Mutation; queuedAt: string | null }[]) => {
+    if (!records.length) return;
+    try {
+      const response = await fetch(`/api/v1/attempts/${id}/late-evidence`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items: records.slice(0, 100) }) });
+      if (response.ok) { await clear(id, records.map((r) => `${id}:${r.mutation.attemptQuestionId}`)); setEvidenceNote(true); }
+    } catch { /* kept on this device; sent again next time the page opens */ }
+  }, [id]);
+
   const flush = useCallback(async function flush(): Promise<void> {
     if (inFlight.current || !pending.current.size || retry.current || readOnlyRef.current) return;
     inFlight.current = true;
@@ -73,19 +88,29 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
       const response = await fetch(`/api/v1/attempts/${id}/answers`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mutations: batch }) });
       const result = await response.json();
       if (response.status >= 500 || response.status === 429) throw new Error(result.message);
-      if (result.code === "TAKEOVER_REQUIRED" || result.code === "STALE_SESSION") { setReadOnly((r) => r ?? "device"); mark(batch.map((m) => m.attemptQuestionId), "failed"); return; }
+      if (result.code === "TAKEOVER_REQUIRED" || result.code === "STALE_SESSION") {
+        // Another session owns the attempt now: these changes become evidence instead of overwriting it.
+        setReadOnly((r) => r ?? "device"); mark(batch.map((m) => m.attemptQuestionId), "failed");
+        batch.forEach((m) => pending.current.delete(m.attemptQuestionId));
+        void sendEvidence(batch.map((mutation) => ({ mutation, queuedAt: null }))); return;
+      }
       if (!response.ok) { setNotice(result.message); mark(batch.map((m) => m.attemptQuestionId), "failed"); batch.forEach((m) => pending.current.delete(m.attemptQuestionId)); return; }
       sync(result);
       for (const r of result.receipts as MutationReceipt[]) {
         if (pending.current.get(r.attemptQuestionId)?.clientMutationId !== r.clientMutationId) continue; // a newer change is queued
         pending.current.delete(r.attemptQuestionId);
+        void settle(id, r.attemptQuestionId, r.clientMutationId);
         mark([r.attemptQuestionId], "saved");
         if (r.status === "stale") setSelected((prev) => ({ ...prev, [r.attemptQuestionId]: r.selectedOptionId ? [r.selectedOptionId] : r.selectedOptionIds }));
       }
-      if (result.closed) { setNotice("Time is up. Changes after the deadline were not saved."); pending.current.clear(); }
+      if (result.closed) {
+        setNotice("Time is up. Changes after the deadline were not saved.");
+        const late = [...pending.current.values()]; pending.current.clear();
+        void sendEvidence(late.map((mutation) => ({ mutation, queuedAt: null })));
+      }
       failures.current = 0; setOnline(true);
     } catch {
-      setOnline(false); mark(batch.map((m) => m.attemptQuestionId), "failed");
+      setOnline(false); mark(batch.map((m) => m.attemptQuestionId), localOkRef.current ? "device" : "failed");
       // Bounded exponential backoff with jitter; reconnecting retries immediately.
       const delay = Math.min(30_000, 1000 * 2 ** failures.current++) + Math.random() * 500;
       retry.current = setTimeout(() => { retry.current = null; void flush(); }, delay);
@@ -93,7 +118,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
       inFlight.current = false;
       if (pending.current.size && !retry.current) void flush();
     }
-  }, [id, sync]);
+  }, [id, sync, sendEvidence]);
 
   function choose(questionId: string, optionIds: string[]) {
     if (!active || submitting || readOnly) return;
@@ -102,8 +127,14 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     setSelected((prev) => ({ ...prev, [questionId]: ids }));
     const sequence = (sequences.current.get(questionId) ?? 0) + 1;
     sequences.current.set(questionId, sequence);
-    pending.current.set(questionId, { attemptQuestionId: questionId, selectedOptionId: multiple ? null : ids[0] ?? null, ...(multiple ? { selectedOptionIds: ids } : {}), clientMutationId: crypto.randomUUID(), sessionGeneration: generation, sequence });
+    const change: Mutation = { attemptQuestionId: questionId, selectedOptionId: multiple ? null : ids[0] ?? null, ...(multiple ? { selectedOptionIds: ids } : {}), clientMutationId: crypto.randomUUID(), sessionGeneration: generation, sequence };
+    pending.current.set(questionId, change);
     mark([questionId], "saving");
+    // Kept on this device before sending, so a reload or crash cannot lose it.
+    void keep(id, change).then((ok) => {
+      if (!ok) { localOkRef.current = false; setLocalOk(false); return; }
+      setSaves((prev) => (prev[questionId] === "saving" && pending.current.get(questionId)?.clientMutationId === change.clientMutationId ? { ...prev, [questionId]: "device" } : prev));
+    });
     void flush();
   }
 
@@ -130,7 +161,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
       if (response.status >= 500 || response.status === 429) throw new Error();
       if (result.code === "TAKEOVER_REQUIRED" || result.code === "STALE_SESSION") setReadOnly((r) => r ?? "device");
       if (!response.ok) { setNotice(result.message); setSubmitting(false); return; }
-      pending.current.clear(); sync(result); setReceipt(result); setConfirming(false); setSubmitting(false);
+      pending.current.clear(); void clear(id); sync(result); setReceipt(result); setConfirming(false); setSubmitting(false);
     } catch {
       // Never claim completion without the server's receipt; keep retrying with the same key.
       setOnline(false); setNotice("Your submission is not confirmed yet. Keep this page open; it is retrying.");
@@ -150,6 +181,35 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     window.addEventListener("online", reconnect); window.addEventListener("offline", offline); window.addEventListener("beforeunload", warn);
     return () => { clearInterval(timer); clearInterval(beat); window.removeEventListener("online", reconnect); window.removeEventListener("offline", offline); window.removeEventListener("beforeunload", warn); };
   }, [id, flush, sync, initial.monitoring]);
+
+  // On open: changes that survived a reload or crash on this device are sent again if they still
+  // belong to this session and are newer than the server's copy; anything else becomes evidence.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    void load(id).then((records: Queued[]) => {
+      if (!records.length) return;
+      const resend: Queued[] = [], evidence: Queued[] = [];
+      for (const r of records) {
+        const current = initial.status === "ACTIVE" && initial.owner && r.mutation.sessionGeneration === generation && r.mutation.sequence > (sequences.current.get(r.mutation.attemptQuestionId) ?? 0);
+        (current ? resend : evidence).push(r);
+      }
+      for (const r of resend) {
+        const m = r.mutation;
+        pending.current.set(m.attemptQuestionId, m);
+        sequences.current.set(m.attemptQuestionId, m.sequence);
+        setSelected((prev) => ({ ...prev, [m.attemptQuestionId]: m.selectedOptionId ? [m.selectedOptionId] : m.selectedOptionIds ?? [] }));
+        mark([m.attemptQuestionId], "device");
+      }
+      if (resend.length) void flush();
+      // Older-session or post-deadline leftovers: preserved for review, never merged into the score.
+      const stale = evidence.filter((r) => initial.status !== "ACTIVE" || r.mutation.sessionGeneration !== generation);
+      const outdated = evidence.filter((r) => !stale.includes(r));
+      if (outdated.length) void clear(id, outdated.map((r) => r.key));
+      void sendEvidence(stale.map((r) => ({ mutation: r.mutation, queuedAt: r.queuedAt })));
+    });
+  }, [id, generation, initial.status, initial.owner, flush, sendEvidence]);
 
   // At zero, ask the server to resolve the attempt; the server's clock is authoritative.
   const resolving = useRef(false);
@@ -187,6 +247,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
       {status === "SUBMITTED" && <p>Your answers were submitted{submittedAt ? ` at ${new Date(submittedAt).toLocaleString("en-KE", { timeZone: "Africa/Nairobi", dateStyle: "medium", timeStyle: "medium" })} (East Africa Time)` : ""}.{receipt?.receiptId && <> Receipt reference: <span className="font-mono text-sm">{receipt.receiptId}</span>.</>}</p>}
       {status === "EXPIRED" && <p>The time limit was reached. Answers the server accepted before the deadline will be marked.</p>}
       {status === "VOIDED" && <p>Your instructor closed this attempt. They will contact you about what happens next.</p>}
+      {evidenceNote && <p className="text-sm">Some answers reached the server after the deadline. They are kept for your instructor to review and are not scored.</p>}
       <p className="text-sm text-muted-foreground">Results are released after every student&apos;s answering window has closed. Attempt reference: <span className="font-mono">{id}</span></p>
       <Button asChild variant="outline"><Link href="/student">Back to your assessments</Link></Button>
     </CardContent></Card>;
@@ -243,6 +304,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
           </div>
         </CardContent></Card>
         {away.awaySeconds !== null && <Alert role="status"><AlertTitle>You left this page</AlertTitle><AlertDescription className="space-y-2"><p>You were away for about {away.awaySeconds} second{away.awaySeconds === 1 ? "" : "s"}. This is recorded. The timer kept running.</p><Button size="sm" variant="outline" onClick={away.dismiss}>OK</Button></AlertDescription></Alert>}
+        {!localOk && <Alert role="status"><AlertDescription>This browser cannot keep answers on this device. They are saved to the server only, so keep this page open if your connection drops.</AlertDescription></Alert>}
         {readOnly && <TakeoverPanel attemptId={id} reason={readOnly} onTaken={taken} />}
         {notice && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
       </div>
