@@ -26,7 +26,11 @@ export default async function AttemptReviewPage({ params }: { params: Promise<{ 
   const letter = (q: (typeof a.questions)[number], optionId: string | null | undefined) => optionId ? LETTERS[q.options.findIndex((o) => o.option.id === optionId)] ?? "?" : null;
   const timeline = [
     ...a.questions.flatMap((q) => q.mutations.map((m) => ({ at: m.acceptedAt, key: m.id, text: `Question ${q.setItem.position}: ${m.selectedOptionId ? `chose ${letter(q, m.selectedOptionId)}` : m.selectedOptionIds.length ? `chose ${m.selectedOptionIds.map((id) => letter(q, id)).sort().join(", ")}` : "cleared the answer"} (revision ${m.resultRevision})`, source: "Answer accepted by the server" }))),
-    ...a.away.map((e) => {
+    ...a.away.filter((e) => e.kind === "TAKEOVER").map((e) => {
+      const m = (e.metadata ?? {}) as { method?: string; toGeneration?: number };
+      return { at: e.serverReceivedAt, key: e.id, text: `Continued in ${m.method === "code" ? "another browser or device (code from email)" : "another tab (confirmed)"}; earlier sessions stopped saving (session ${m.toGeneration ?? "?"})`, source: "Server" };
+    }),
+    ...a.away.filter((e) => e.kind !== "TAKEOVER").map((e) => {
       const m = (e.metadata ?? {}) as { reasons?: string[]; size?: { width: number; height: number }; device?: { type?: string; os?: string; multipleScreens?: boolean | null } };
       const length = e.clientOccurredAt && e.clientEndedAt ? `${Math.round((e.clientEndedAt.getTime() - e.clientOccurredAt.getTime()) / 1000)} s` : "unknown length (did not return)";
       const what = e.kind === "SMALL_WINDOW" ? `Window smaller than the screen (at most ${m.size?.width ?? "?"}% wide × ${m.size?.height ?? "?"}% high)` : `Left the page (${m.reasons?.includes("hidden") ? "page hidden" : "window lost focus"})`;

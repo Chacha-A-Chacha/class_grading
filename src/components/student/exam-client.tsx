@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { useAwayTracking } from "./use-away-tracking";
+import { TakeoverPanel } from "./takeover-panel";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 const HEARTBEAT_MS = 15_000;
@@ -39,6 +40,10 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   const [saves, setSaves] = useState<Record<string, SaveState>>({});
   const [online, setOnline] = useState(true);
   const [notice, setNotice] = useState("");
+  // Read-only while another tab or device holds the attempt (specification §6, A06).
+  const [readOnly, setReadOnly] = useState<null | "tab" | "device">(initial.owner ? null : "device");
+  const readOnlyRef = useRef(readOnly);
+  useEffect(() => { readOnlyRef.current = readOnly; }, [readOnly]);
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<SubmitResult | null>(null);
@@ -56,17 +61,19 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     if (s.serverNow) offset.current = Date.parse(s.serverNow) - Date.now();
     if (s.expiresAt) setExpiresAt(Date.parse(s.expiresAt));
     if (s.status) setStatus(s.status);
-  }, []);
+    if (s.generation && s.generation > generation) setReadOnly((r) => r ?? "device");
+  }, [generation]);
   const mark = (ids: string[], state: SaveState) => setSaves((prev) => ({ ...prev, ...Object.fromEntries(ids.map((q) => [q, state])) }));
 
   const flush = useCallback(async function flush(): Promise<void> {
-    if (inFlight.current || !pending.current.size || retry.current) return;
+    if (inFlight.current || !pending.current.size || retry.current || readOnlyRef.current) return;
     inFlight.current = true;
     const batch = [...pending.current.values()];
     try {
       const response = await fetch(`/api/v1/attempts/${id}/answers`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mutations: batch }) });
       const result = await response.json();
       if (response.status >= 500 || response.status === 429) throw new Error(result.message);
+      if (result.code === "TAKEOVER_REQUIRED" || result.code === "STALE_SESSION") { setReadOnly((r) => r ?? "device"); mark(batch.map((m) => m.attemptQuestionId), "failed"); return; }
       if (!response.ok) { setNotice(result.message); mark(batch.map((m) => m.attemptQuestionId), "failed"); batch.forEach((m) => pending.current.delete(m.attemptQuestionId)); return; }
       sync(result);
       for (const r of result.receipts as MutationReceipt[]) {
@@ -89,7 +96,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   }, [id, sync]);
 
   function choose(questionId: string, optionIds: string[]) {
-    if (!active || submitting) return;
+    if (!active || submitting || readOnly) return;
     const multiple = multipleIds.current.has(questionId);
     const ids = multiple ? [...new Set(optionIds)].sort() : optionIds.slice(0, 1);
     setSelected((prev) => ({ ...prev, [questionId]: ids }));
@@ -101,6 +108,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   }
 
   async function toggleReview(questionId: string) {
+    if (readOnly) return;
     const next = !marked[questionId];
     setMarked((prev) => ({ ...prev, [questionId]: next }));
     try {
@@ -111,6 +119,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   }
 
   async function submit() {
+    if (readOnlyRef.current) return;
     setSubmitting(true); setNotice("");
     const key = `submit:${id}`;
     const submissionId = sessionStorage.getItem(key) ?? crypto.randomUUID();
@@ -119,6 +128,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
       const response = await fetch(`/api/v1/attempts/${id}/submit`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ submissionId, mutations: [...pending.current.values()] }) });
       const result = await response.json();
       if (response.status >= 500 || response.status === 429) throw new Error();
+      if (result.code === "TAKEOVER_REQUIRED" || result.code === "STALE_SESSION") setReadOnly((r) => r ?? "device");
       if (!response.ok) { setNotice(result.message); setSubmitting(false); return; }
       pending.current.clear(); sync(result); setReceipt(result); setConfirming(false); setSubmitting(false);
     } catch {
@@ -136,7 +146,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     const reconnect = () => { setOnline(true); if (retry.current) { clearTimeout(retry.current); retry.current = null; } void flush(); };
     const offline = () => setOnline(false);
     // Monitored attempts ask before closing, reloading or leaving; others only while saving.
-    const warn = (e: BeforeUnloadEvent) => { if (pending.current.size || (initial.monitoring && statusRef.current === "ACTIVE")) e.preventDefault(); };
+    const warn = (e: BeforeUnloadEvent) => { if (!readOnlyRef.current && (pending.current.size || (initial.monitoring && statusRef.current === "ACTIVE"))) e.preventDefault(); };
     window.addEventListener("online", reconnect); window.addEventListener("offline", offline); window.addEventListener("beforeunload", warn);
     return () => { clearInterval(timer); clearInterval(beat); window.removeEventListener("online", reconnect); window.removeEventListener("offline", offline); window.removeEventListener("beforeunload", warn); };
   }, [id, flush, sync, initial.monitoring]);
@@ -150,7 +160,26 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
   }, [active, remaining, id, sync]);
 
   // Rules version 2+ told the student this is recorded; it never pauses or ends the exam.
-  const away = useAwayTracking({ attemptId: id, generation, enabled: initial.monitoring && active });
+  const away = useAwayTracking({ attemptId: id, generation, enabled: initial.monitoring && active && !readOnly });
+
+  // One writing tab per browser: a new tab asks; an active tab answers, so the new one opens read-only.
+  const channel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (!active || typeof BroadcastChannel === "undefined") return;
+    const tab = crypto.randomUUID();
+    const ch = new BroadcastChannel(`tracebench-attempt-${id}`);
+    channel.current = ch;
+    ch.onmessage = (e: MessageEvent<{ type: string; from: string; to?: string }>) => {
+      const m = e.data;
+      if (m.from === tab) return;
+      if (m.type === "hello" && !readOnlyRef.current) ch.postMessage({ type: "here", from: tab, to: m.from });
+      if (m.type === "here" && m.to === tab) setReadOnly((r) => r ?? "tab");
+      if (m.type === "taken") setReadOnly("tab");
+    };
+    ch.postMessage({ type: "hello", from: tab });
+    return () => { ch.close(); channel.current = null; };
+  }, [active, id]);
+  const taken = () => { channel.current?.postMessage({ type: "taken", from: "takeover" }); window.location.reload(); };
 
   if (!active) {
     const submittedAt = receipt?.submittedAt ?? initial.submittedAt;
@@ -180,7 +209,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
     const on = chosen.includes(o.id);
     return <Label key={o.id} htmlFor={`option-${o.id}`} className={cn("flex w-full cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal leading-relaxed transition-colors hover:bg-muted/60", on && "border-primary bg-accent/40 hover:bg-accent/40")}>
       {multipleChoice
-        ? <Checkbox id={`option-${o.id}`} className={control} checked={on} disabled={submitting} onCheckedChange={(c) => choose(question.id, c === true ? [...chosen, o.id] : chosen.filter((x) => x !== o.id))} />
+        ? <Checkbox id={`option-${o.id}`} className={control} checked={on} disabled={submitting || !!readOnly} onCheckedChange={(c) => choose(question.id, c === true ? [...chosen, o.id] : chosen.filter((x) => x !== o.id))} />
         : <RadioGroupItem value={o.id} id={`option-${o.id}`} className={control} />}
       <span className="w-4 shrink-0 font-semibold">{LETTERS[i]}</span>
       <span className="min-w-0 flex-1">{o.kind === "CODE" ? <code className="block overflow-x-auto font-mono text-sm whitespace-pre">{o.content}</code> : <span className="whitespace-pre-wrap">{o.content}</span>}</span>
@@ -204,16 +233,17 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
           {multipleChoice && <p className="text-sm text-muted-foreground">Choose every correct option. The point is awarded only for exactly the correct set.</p>}
           {multipleChoice
             ? <div role="group" aria-label={`Answers for question ${index + 1}`} className="grid gap-2">{rows}</div>
-            : <RadioGroup aria-label={`Answer for question ${index + 1}`} value={chosen[0] ?? ""} onValueChange={(v) => choose(question.id, [v])} className="gap-2" disabled={submitting}>{rows}</RadioGroup>}
+            : <RadioGroup aria-label={`Answer for question ${index + 1}`} value={chosen[0] ?? ""} onValueChange={(v) => choose(question.id, [v])} className="gap-2" disabled={submitting || !!readOnly}>{rows}</RadioGroup>}
           <p aria-live="polite" className={cn("text-sm", saveState === "failed" ? "text-destructive" : "text-muted-foreground")}>{saveState ? SAVE_TEXT[saveState] : chosen.length ? SAVE_TEXT.saved : "Not answered"}</p>
           <div className="flex flex-wrap gap-3">
             <Button variant="outline" disabled={index === 0} onClick={() => setIndex(index - 1)}><ChevronLeft aria-hidden="true" />Previous</Button>
             <Button variant="outline" disabled={index === total - 1} onClick={() => setIndex(index + 1)}>Next<ChevronRight aria-hidden="true" /></Button>
             <Button variant="ghost" onClick={() => void toggleReview(question.id)}><Flag aria-hidden="true" />{marked[question.id] ? "Unmark review" : "Mark for review"}</Button>
-            {chosen.length > 0 && <Button variant="ghost" disabled={submitting} onClick={() => choose(question.id, [])}>Clear answer</Button>}
+            {chosen.length > 0 && <Button variant="ghost" disabled={submitting || !!readOnly} onClick={() => choose(question.id, [])}>Clear answer</Button>}
           </div>
         </CardContent></Card>
         {away.awaySeconds !== null && <Alert role="status"><AlertTitle>You left this page</AlertTitle><AlertDescription className="space-y-2"><p>You were away for about {away.awaySeconds} second{away.awaySeconds === 1 ? "" : "s"}. This is recorded. The timer kept running.</p><Button size="sm" variant="outline" onClick={away.dismiss}>OK</Button></AlertDescription></Alert>}
+        {readOnly && <TakeoverPanel attemptId={id} reason={readOnly} onTaken={taken} />}
         {notice && <Alert variant="destructive"><AlertDescription>{notice}</AlertDescription></Alert>}
       </div>
 
@@ -234,7 +264,7 @@ export function ExamClient({ initial }: { initial: AttemptView }) {
           </ul>
         </CardContent></Card>
         {!confirming
-          ? <Button className="w-full" disabled={submitting} onClick={() => setConfirming(true)}>Review and submit</Button>
+          ? <Button className="w-full" disabled={submitting || !!readOnly} onClick={() => setConfirming(true)}>Review and submit</Button>
           : <Alert><AlertTitle>Submit your answers?</AlertTitle><AlertDescription className="space-y-3"><p>{unanswered ? `${unanswered} question${unanswered === 1 ? " is" : "s are"} unanswered.` : "Every question is answered."}{pending.current.size ? ` ${pending.current.size} answer${pending.current.size === 1 ? " is" : "s are"} still being saved and will be sent with your submission.` : ""} You cannot change answers after submitting.</p><div className="flex flex-wrap gap-2"><Button disabled={submitting} onClick={() => void submit()}>{submitting ? "Submitting…" : "Submit now"}</Button><Button variant="outline" disabled={submitting} onClick={() => setConfirming(false)}>Keep working</Button></div></AlertDescription></Alert>}
       </aside>
     </div>
