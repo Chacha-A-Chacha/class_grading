@@ -46,3 +46,5 @@ export type AttemptView = AttemptState & {
   }[];
 };
 export type SubmitResult = AttemptState & { receiptId: string | null; submittedAt: string | null; answered: number; total: number; receipts: MutationReceipt[] };
+/** Late evidence: rejected changes with the client's (unverified) time they were queued. */
+export const lateEvidenceSchema = z.object({ items: z.array(z.object({ mutation: mutationSchema, queuedAt: z.string().datetime().nullable() })).min(1).max(100) });

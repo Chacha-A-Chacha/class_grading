@@ -351,3 +351,32 @@ export async function takeOver(db: PrismaClient, userId: string, userSessionId: 
   if (outcome.error === "INVALID_CODE") throw new AppError("INVALID_CODE", "The code is invalid or expired. Request a new code if needed.", 401);
   return state(outcome.attempt, outcome.time);
 }
+
+/** Bounds untrusted evidence per attempt. */
+const MAX_EVIDENCE = 200;
+
+/**
+ * Preserves answer changes the server could not accept (A05): queued offline past the
+ * deadline, or left over from a session that another device took over. Stored apart from
+ * scored answers; reviewers may keep the grade or void and retest, never merge them in.
+ */
+export async function recordLateEvidence(db: PrismaClient, userId: string, attemptId: string, items: { mutation: Mutation; queuedAt: string | null }[], writer?: string) {
+  return withRetry(() => db.$transaction(async (tx) => {
+    const { attempt: locked, time } = await lockOwned(tx, attemptId, userId);
+    const attempt = await resolveOverdue(tx, locked, time);
+    if (attempt.status === "ACTIVE") {
+      // While the attempt runs, only a superseded session's leftovers are evidence; the owner saves normally.
+      const [owner] = await tx.$queryRaw<{ userSessionId: string | null }[]>`SELECT "userSessionId" FROM "AttemptSession" WHERE "attemptId" = ${attemptId}::uuid AND generation = ${attempt.currentGeneration}`;
+      const current = items.every((i) => i.mutation.sessionGeneration === attempt.currentGeneration) && (writer === undefined || owner?.userSessionId === writer);
+      if (current) throw new AppError("STILL_OPEN", "This attempt is still open. Save answers normally.", 409);
+    }
+    const held = await tx.lateAnswerEvidence.count({ where: { attemptId } });
+    const room = Math.max(0, MAX_EVIDENCE - held);
+    const data = items.slice(0, room).map(({ mutation, queuedAt }) => ({
+      attemptId, clientMutationId: mutation.clientMutationId, clientOccurredAt: queuedAt ? new Date(queuedAt) : null, payload: mutation as unknown as Prisma.InputJsonValue,
+      payloadHash: createHash("sha256").update(JSON.stringify(mutation)).digest("hex"), serverReceivedAt: time,
+    }));
+    const { count } = await tx.lateAnswerEvidence.createMany({ data, skipDuplicates: true });
+    return { kept: count, ignored: items.length - count };
+  }));
+}

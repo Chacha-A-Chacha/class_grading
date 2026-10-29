@@ -15,7 +15,7 @@ import { detailsSchema, toNairobiInput } from "../../src/shared/assessments";
 import type { Mutation } from "../../src/shared/attempts";
 import { activateDraft, createQuestion } from "../../src/server/questions/service";
 import { createAssessment, generateAssessmentSets, publishAssessment, saveBlueprint, setAudience } from "../../src/server/assessments/service";
-import { expireOverdue, getAttemptView, heartbeat, requestTakeoverCode, saveAnswers, startAttempt, submitAttempt, takeOver } from "../../src/server/attempts/service";
+import { expireOverdue, getAttemptView, heartbeat, recordLateEvidence, requestTakeoverCode, saveAnswers, startAttempt, submitAttempt, takeOver } from "../../src/server/attempts/service";
 import { recordAwayEvents } from "../../src/server/attempts/events";
 import type { AwayEvent } from "../../src/shared/monitoring";
 
@@ -277,4 +277,31 @@ test("A06/A18: only the owning session writes; another device takes over with a 
   assert.deepEqual(events.map((e) => (e.metadata as { method: string }).method), ["code", "confirm"]);
   await submitAttempt(db, s.id, attemptId, randomUUID(), [], other);
   await assert.rejects(takeOver(db, s.id, s.session, attemptId, "browser-1"), (e) => code(e) === "ATTEMPT_CLOSED");
+});
+
+test("A05: answers queued past the deadline are kept as evidence, never scored", async () => {
+  const id = await published([students[2].id]);
+  const s = students[2];
+  const { attemptId } = await start(s, id);
+  const [q] = await db.attemptQuestion.findMany({ where: { attemptId }, include: { options: true } });
+  const queued = mutation(q.id, q.options[0].questionOptionId, 1);
+  // While the attempt is open, the owner must save normally.
+  await assert.rejects(recordLateEvidence(db, s.id, attemptId, [{ mutation: queued, queuedAt: new Date().toISOString() }], s.session), (e) => code(e) === "STILL_OPEN");
+  // A superseded session's leftover is evidence even while the attempt runs.
+  assert.deepEqual(await recordLateEvidence(db, s.id, attemptId, [{ mutation: { ...queued, clientMutationId: randomUUID(), sessionGeneration: 1 }, queuedAt: null }], "another-session"), { kept: 1, ignored: 0 });
+  const past = new Date(Date.now() - 2 * 3600_000);
+  await db.attempt.update({ where: { id: attemptId }, data: { startedAt: past, acknowledgedAt: past, expiresAt: new Date(Date.now() - 60_000) } });
+  const rejected = await saveAnswers(db, s.id, attemptId, [queued], s.session);
+  assert.equal(rejected.closed, true);
+  const before = await db.scoreRevision.findFirstOrThrow({ where: { attemptId } });
+  const kept = await recordLateEvidence(db, s.id, attemptId, [{ mutation: queued, queuedAt: new Date(Date.now() - 90_000).toISOString() }], s.session);
+  assert.deepEqual(kept, { kept: 1, ignored: 0 });
+  assert.deepEqual(await recordLateEvidence(db, s.id, attemptId, [{ mutation: queued, queuedAt: null }], s.session), { kept: 0, ignored: 1 }, "deduplicated by client mutation id");
+  assert.equal(await db.answerMutation.count({ where: { attemptId } }), 0, "nothing reached the scored answers");
+  const after = await db.scoreRevision.findFirstOrThrow({ where: { attemptId } });
+  assert.deepEqual([after.rawCorrect, after.scoringRevision], [before.rawCorrect, before.scoringRevision]);
+  const evidence = await db.lateAnswerEvidence.findMany({ where: { attemptId } });
+  assert.equal(evidence.length, 2);
+  assert.ok(evidence.some((e) => e.clientOccurredAt !== null), "the client's queue time is stored, unverified");
+  await assert.rejects(recordLateEvidence(db, students[0].id, attemptId, [{ mutation: queued, queuedAt: null }]), (e) => code(e) === "NOT_FOUND");
 });
