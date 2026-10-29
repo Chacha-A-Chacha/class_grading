@@ -107,11 +107,17 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   hardest first. Each student counts once via their latest non-voided finished attempt;
   under 10 responses is provisional and under 5 is hidden. `?tab=results` or
   `?tab=reports` opens a tab directly. Tests in `tests/db/results.test.ts`.
+- **Changes after publication:** the Audience tab adds students to a published,
+  unreleased assessment (a late window is required once the latest start has passed);
+  an unused attempt whose window passed gets a new window without an extra attempt
+  (attempt and student pages); retest times default to the assessment's own window.
+  Student pages correct the name or admission number (old values kept in the audit)
+  and change the login email after an identity check, ending sessions and codes until
+  the new address is verified. Tests in `tests/db/overrides.test.ts` and `admin.test.ts`.
 
 The device-local recovery queue, takeover and late evidence (milestone 4), incident
 review, readiness
-checks, workers, Docker/Caddy and load testing remain upcoming. Correcting a
-student's name, admission number or login email is not built yet. Liveness only
+checks, workers, Docker/Caddy and load testing remain upcoming. Liveness only
 proves the application can respond; it does not certify exam readiness.
 Existing root HTML/CSS files remain historical files, outside Next.js routing.
 See the [performance and load plan](docs/performance.md) before building the

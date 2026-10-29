@@ -11,9 +11,9 @@ device type and multi-screen use where the browser reports it. Students are warn
 before leaving, while away (tab title) and on return; the attempt timeline shows them; review-case
 dispositions and late evidence are not built. Result release is built: a Results tab
 with a release checklist, release now or hold, automatic release by the worker for
-assessments not held, the student result page and CSV export. Profile/email
-correction for conflicting rows and audited schedule changes after publication are
-not built yet. Reports are built (Reports tab). Faulty-question exclusion with a preview and durable
+assessments not held, the student result page and CSV export. Reports are built (Reports tab). Name, admission-number and login-email corrections,
+adding students after publication and new windows for missed starts are built
+(student pages, Audience tab, attempt pages). Faulty-question exclusion with a preview and durable
 rescoring is built (Results tab, Scoring).
 This plan follows
 [the specification](../SPECIFICATION.md) and the existing Prisma schema.
