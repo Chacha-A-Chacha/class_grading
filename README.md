@@ -144,6 +144,11 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   `pg_dump` (checksummed, pruned after 14 days, optional off-host copy via
   `BACKUP_REMOTE`); `scripts/restore-drill.sh` restores the newest one into an empty
   `*drill*` database, compares it with the live one and reports the restore time.
+  On the sandbox VPS a daily backup runs from cron; the 29 Oct 2026 drill restored a
+  matching copy in 3 s. **Reduced guarantee until WAL archiving and an off-host target
+  are set up:** recovery point is up to 24 hours (not the specification's 5 minutes), and
+  backups sit on the same host, so losing the VPS loses them. Keep the backup passphrase
+  outside the server too, or the backups cannot be decrypted.
 
 Load testing remains upcoming. Liveness only
 proves the application can respond; it does not certify exam readiness.
