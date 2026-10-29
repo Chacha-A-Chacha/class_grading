@@ -136,7 +136,16 @@ The production-only audit reports zero known vulnerabilities as of 13 October
   change a score; voids and retests stay separate actions. A Reviews tab lists cases,
   open first; open cases are shown, not enforced, in the release checklist.
 
-Readiness checks, backups and load testing remain upcoming. Liveness only
+- **Operations:** `/api/v1/health/live` says the process responds; `/api/v1/health/ready`
+  returns 200 only when the database answers and every shipped migration is applied
+  (503 with `database` or `migrations` otherwise). `npm run db:cleanup-auth` also deletes
+  page-activity records, late evidence and answer-change history 90 days after results
+  release, except while a review is open. `scripts/backup.sh` writes an AES-256 encrypted
+  `pg_dump` (checksummed, pruned after 14 days, optional off-host copy via
+  `BACKUP_REMOTE`); `scripts/restore-drill.sh` restores the newest one into an empty
+  `*drill*` database, compares it with the live one and reports the restore time.
+
+Load testing remains upcoming. Liveness only
 proves the application can respond; it does not certify exam readiness.
 Existing root HTML/CSS files remain historical files, outside Next.js routing.
 See the [performance and load plan](docs/performance.md) before building the
