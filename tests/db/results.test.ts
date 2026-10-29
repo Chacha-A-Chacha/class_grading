@@ -18,6 +18,7 @@ import { getAttemptView, saveAnswers, startAttempt, submitAttempt } from "../../
 import { authorizeRetest, voidAttempt } from "../../src/server/attempts/admin";
 import { exportResults, readiness, releaseDue, releaseResults, setReleaseHold, studentResult } from "../../src/server/results/service";
 import { excludeQuestion, exclusionPreview, runJobs } from "../../src/server/results/rescore";
+import { assessmentReport, sample } from "../../src/server/results/reports";
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error("Set TEST_DATABASE_URL explicitly. Tests never default to the application database.");
@@ -225,4 +226,30 @@ test("excluding every question makes results ungradable; a superseded job ends c
   const latest = await db.scoreRevision.findFirstOrThrow({ where: { attemptId }, orderBy: { scoringRevision: "desc" } });
   assert.deepEqual([latest.scoringRevision, latest.availablePoints, latest.passed], [3, 0, null]);
   assert.equal(await db.scoreRevision.count({ where: { attemptId, scoringRevision: 2 } }), 0, "superseded revision never written");
+});
+
+test("report counts each student once, bands scores and finds the most-chosen wrong option", async () => {
+  const id = await published([students[0].id, students[1].id, students[2].id]);
+  // Student 0: one right; student 1: blank; student 2: chooses a wrong option on question 1.
+  const a0 = (await start(students[0], id)).attemptId; await answerFirstCorrectly(students[0], a0); await submitAttempt(db, students[0].id, a0, randomUUID(), []);
+  const a1 = (await start(students[1], id)).attemptId; await submitAttempt(db, students[1].id, a1, randomUUID(), []);
+  const a2 = (await start(students[2], id)).attemptId;
+  const view = await getAttemptView(db, students[2].id, a2);
+  const keys = await db.attemptQuestion.findUniqueOrThrow({ where: { id: view.questions[0].id }, select: { setItem: { select: { questionVersion: { select: { answerKeys: true } } } } } });
+  const wrong = view.questions[0].options.find((o) => o.id !== keys.setItem.questionVersion.answerKeys[0].correctOptionId)!;
+  await saveAnswers(db, students[2].id, a2, [{ attemptQuestionId: view.questions[0].id, selectedOptionId: wrong.id, clientMutationId: randomUUID(), sessionGeneration: 1, sequence: 1 }]);
+  await submitAttempt(db, students[2].id, a2, randomUUID(), []);
+  // A retest for student 1: only their latest finished attempt may count.
+  const s1 = await db.assessmentAssignment.findFirstOrThrow({ where: { assessmentId: id, userId: students[1].id } });
+  await authorizeRetest(db, owner, s1.id, s1.recordVersion, new Date(Date.now() + 3600_000), new Date(Date.now() + 7200_000), "Retest for the report test");
+  const r1 = (await start(students[1], id)).attemptId; await answerFirstCorrectly(students[1], r1); await submitAttempt(db, students[1].id, r1, randomUUID(), []);
+  const report = await assessmentReport(db, id);
+  assert.deepEqual([report.assigned, report.completed, report.gradable, report.notStarted], [3, 3, 3, 0], "one result per student");
+  assert.deepEqual(report.bands.filter((b) => b.count).map((b) => [b.from, b.count]), [[0, 1], [50, 2]]);
+  assert.equal(report.technical.retests, 1);
+  const answeredWrong = (await db.attemptQuestion.findUniqueOrThrow({ where: { id: view.questions[0].id } })).questionVersionId;
+  const first = report.items.find((i) => i.versionId === answeredWrong)!;
+  assert.equal(first.topWrong!.content, wrong.content); assert.equal(first.topWrong!.count, 1);
+  assert.equal(first.responses, 3); assert.equal(first.sample, "suppressed");
+  assert.deepEqual([sample(4), sample(5), sample(9), sample(10)], ["suppressed", "provisional", "provisional", "ok"]);
 });
