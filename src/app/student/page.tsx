@@ -15,6 +15,9 @@ function describe(row: Row, time: Date) {
   const canStart = row.attempts.length < row.allowedAttemptCount && !row.assessment.releasedAt;
   if (canStart && time < row.openAt) return { label: `Opens ${nairobiFormat.format(row.openAt)}`, tone: "outline" as const };
   if (canStart && time <= row.latestStartAt) return { label: row.attempts.length ? "Retest available" : "Open", tone: "default" as const, action: { href: `/student/assessments/${row.assessment.id}`, text: "Read the rules and start" } };
+  // After release, link the latest non-voided finished attempt's result.
+  const finished = row.attempts.find((a) => a.status === "SUBMITTED" || a.status === "EXPIRED");
+  if (row.assessment.releasedAt && finished) return { label: "Results released", tone: "default" as const, action: { href: `/student/attempts/${finished.id}/result`, text: "View your result" } };
   if (latest?.status === "SUBMITTED") return { label: "Submitted", tone: "secondary" as const, action: { href: `/student/attempts/${latest.id}`, text: "View receipt" } };
   if (latest?.status === "EXPIRED") return { label: "Time ended", tone: "secondary" as const, action: { href: `/student/attempts/${latest.id}`, text: "View summary" } };
   if (latest?.status === "VOIDED") return { label: "Voided by your instructor", tone: "outline" as const };
